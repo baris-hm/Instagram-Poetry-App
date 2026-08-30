@@ -1,14 +1,13 @@
-# Şiirden Karelere
+# Instagram Poetry To Slides App
 
-An accessible, dependency-free prototype that turns a Turkish poem into an
-editable Instagram carousel preview.
+An accessible, dependency-free prototype that I'm building for my grandpa who's a turkish poet. The app turns a poem into an editable Instagram carousel preview.
 
 ## What is included
 
 - A large poem input with optional title, description, and photograph
 - A Python preview API backed by an isolated Turkish stanza divider
 - A touch/swipe carousel preview
-- Preview-only dörtlük (four-line) and beyit (two-line) reflow controls
+- Preview-only four-line and beyit  two-line reflow controls
 - Live 10-slide validation that counts the optional photograph
 - An untouched optional photograph as the final carousel slide
 - A configurable `@handle-` mark on every poem slide
@@ -67,7 +66,7 @@ chunks each stanza into groups of two or four non-empty lines. It intentionally
 does not combine separate stanzas. That conservative rule is easy to replace
 later without changing the web interface or server route.
 
-The preview starts in dörtlük view. Beyit view initially groups two lines per
+The preview starts in four-lines (dörtlük) view. Beyit view initially groups two lines (beyit) per
 slide, but the line editor still allows up to four lines on every slide. To
 preserve poem order, only the first line can move backward and only the last
 line can move forward. Switching views rebuilds the grouping from the original
