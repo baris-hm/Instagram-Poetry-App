@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Şiirleri okunaklı Instagram gönderilerine dönüştüren sade bir araç."
+    >
+    <title>Şiirden Karelere</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">İçeriğe geç</a>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Şiirden Karelere ana sayfa">
+        <span class="brand-mark" aria-hidden="true">Ş</span>
+        <span>
+          <strong>Şiirden Karelere</strong>
+          <small>Instagram şiir hazırlayıcı</small>
+        </span>
+      </a>
+      <span class="prototype-badge">Prototip</span>
+    </header>
+
+    <main id="main-content">
+      <section id="composer-view" class="view composer-view" aria-labelledby="composer-title">
+        <div class="intro">
+          <p class="eyebrow">Yeni gönderi</p>
+          <h1 id="composer-title">Şiirini paylaşmaya hazırla.</h1>
+          <p>
+            Metni yapıştır; şiirin kıtalarını okunaklı karelere ayıralım.
+            Yayınlamadan önce her satırın yerini değiştirebilirsin.
+          </p>
+        </div>
+
+        <form id="poem-form" class="poem-form" novalidate>
+          <div class="field field-large">
+            <div class="field-heading">
+              <label for="poem">Şiiri yapıştır <span aria-hidden="true">*</span></label>
+              <span id="poem-count" class="character-count">0 karakter</span>
+            </div>
+            <textarea
+              id="poem"
+              name="poem"
+              rows="14"
+              required
+              autofocus
+              placeholder="Şiirini buraya yapıştır…&#10;&#10;Kıtalar arasında boş bir satır bırakabilirsin."
+            ></textarea>
+          </div>
+
+          <div class="optional-grid">
+            <div class="field">
+              <label for="title">Başlık <span class="optional">İsteğe bağlı</span></label>
+              <input id="title" name="title" type="text" maxlength="120" placeholder="Şiirin adı">
+            </div>
+
+            <div class="field">
+              <label for="description">Açıklama <span class="optional">İsteğe bağlı</span></label>
+              <textarea
+                id="description"
+                name="description"
+                rows="4"
+                maxlength="2200"
+                placeholder="Gönderi açıklaması, notlar veya etiketler…"
+              ></textarea>
+            </div>
+          </div>
+
+          <div class="photo-field">
+            <input
+              id="photo"
+              name="photo"
+              class="visually-hidden"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+            >
+            <label class="photo-button" for="photo">
+              <span id="photo-icon" class="photo-icon" aria-hidden="true">⌁</span>
+              <img
+                id="photo-preview-thumb"
+                class="photo-preview-thumb"
+                alt="Seçilen fotoğrafın önizlemesi"
+                hidden
+              >
+              <span>
+                <strong>Fotoğraf seç</strong>
+                <small>İsteğe bağlı · JPG, PNG veya WebP</small>
+              </span>
+            </label>
+            <div id="photo-selection" class="photo-selection" hidden>
+              <span id="photo-name"></span>
+              <button id="remove-photo" type="button" class="text-button">Kaldır</button>
+            </div>
+          </div>
+
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+
+          <button id="create-preview" class="primary-button create-button" type="submit">
+            <span>Önizleme oluştur</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </form>
+      </section>
+
+      <section id="preview-view" class="view preview-view" aria-labelledby="preview-title" hidden>
+        <header class="preview-header">
+          <button id="back-to-editor" class="back-button" type="button">
+            <span aria-hidden="true">←</span> Şiire dön
+          </button>
+          <div>
+            <p class="eyebrow">Gönderi önizlemesi</p>
+            <h1 id="preview-title">Karelerini düzenle.</h1>
+            <p>Kaydırarak gez; bir satırın hangi karede görüneceğini aşağıdan değiştir.</p>
+            <fieldset class="layout-field preview-layout-field">
+              <legend>Kare düzeni</legend>
+              <div class="layout-options" role="group" aria-label="Şiir satırı düzeni">
+                <button
+                  id="quatrain-layout"
+                  class="layout-option is-selected"
+                  type="button"
+                  aria-pressed="true"
+                >
+                  <strong>Dörtlük görünümü</strong>
+                  <span id="quatrain-count">4 satırla başlayan kareler</span>
+                </button>
+                <button
+                  id="couplet-layout"
+                  class="layout-option"
+                  type="button"
+                  aria-pressed="false"
+                  aria-describedby="layout-status"
+                >
+                  <strong>Beyit görünümü</strong>
+                  <span id="couplet-count">2 satırla başlayan kareler</span>
+                </button>
+              </div>
+              <p id="layout-status" class="layout-status" aria-live="polite">
+                Görünümü değiştirmek satır yerleşimini yeniden oluşturur.
+              </p>
+            </fieldset>
+          </div>
+        </header>
+
+        <div class="preview-layout">
+          <div class="carousel-column">
+            <div class="carousel-shell">
+              <button id="previous-slide" class="carousel-arrow carousel-arrow-left" type="button" aria-label="Önceki kare">
+                ←
+              </button>
+              <div id="carousel" class="carousel" tabindex="0" aria-label="Şiir kareleri">
+                <div id="carousel-track" class="carousel-track"></div>
+              </div>
+              <button id="next-slide" class="carousel-arrow carousel-arrow-right" type="button" aria-label="Sonraki kare">
+                →
+              </button>
+            </div>
+
+            <div class="carousel-status">
+              <div id="carousel-dots" class="carousel-dots" aria-label="Kare seçimi"></div>
+              <strong id="slide-counter" aria-live="polite">1 / 1</strong>
+            </div>
+          </div>
+
+          <aside class="line-editor" aria-labelledby="line-editor-title">
+            <div class="editor-heading">
+              <div>
+                <p class="eyebrow">Satır düzeni</p>
+                <h2 id="line-editor-title">Bu karedeki satırlar</h2>
+              </div>
+              <span id="current-slide-label" class="slide-label">Kare 1</span>
+            </div>
+            <div id="line-list" class="line-list"></div>
+            <p class="editor-help">
+              Sırayı korumak için yalnızca ilk ve son satır taşınabilir. Her kare, görünümden bağımsız olarak en fazla dört satır alır.
+            </p>
+          </aside>
+        </div>
+
+        <div id="caption-panel" class="caption-panel" hidden>
+          <span>Açıklama</span>
+          <p id="preview-description"></p>
+        </div>
+
+        <div class="publish-area">
+          <button
+            id="publish-button"
+            class="publish-button"
+            type="button"
+            aria-describedby="publish-note"
+            disabled
+          >
+            Instagram'da yayınla
+          </button>
+          <p id="publish-note">Instagram bağlantısı sonraki aşamada eklenecek.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Şiirden Karelere</span>
+      <span>Şiirin sende kalır.</span>
+    </footer>
+  </body>
+</html>
