@@ -1,19 +1,25 @@
-"""Dependency-free HTTP layer for the poetry carousel prototype."""
+"""HTTP application layer for composing and publishing poetry carousels."""
 
 from __future__ import annotations
 
 import json
 import logging
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .instagram_client import InstagramAPIError
+from .media_server import PublicMediaServer, create_media_server
 from .poem_divider import DEFAULT_LINES_PER_SLIDE, divide_poem
+from .publisher import InstagramPublishingService, PublishRequest, PublishValidationError
+from .renderer import RenderError
+from .settings import AppSettings
 
 LOGGER = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).with_name("static")
-MAX_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_REQUEST_BYTES = 16 * 1024 * 1024
 MAX_CAROUSEL_SLIDES = 10
 SUPPORTED_LINES_PER_SLIDE = {2, DEFAULT_LINES_PER_SLIDE}
 
@@ -26,14 +32,21 @@ _STATIC_ROUTES: dict[str, tuple[Path, str]] = {
 
 
 class PoetryRequestHandler(BaseHTTPRequestHandler):
-    """Serve the app shell and a small JSON preview endpoint."""
+    """Serve the app shell and JSON application endpoints."""
 
-    server_version = "PoetryCarousel/0.1"
+    server_version = "PoetryCarousel/0.2"
+
+    @property
+    def settings(self) -> AppSettings:
+        return self.server.settings  # type: ignore[attr-defined]
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0]
         if path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
+            return
+        if path == "/api/config":
+            self._handle_config()
             return
 
         route = _STATIC_ROUTES.get(path)
@@ -46,10 +59,33 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0]
-        if path != "/api/preview":
-            self._send_json(HTTPStatus.NOT_FOUND, {"error": "Sayfa bulunamadı."})
+        if path == "/api/preview":
+            self._handle_preview()
             return
+        if path == "/api/publish":
+            self._handle_publish()
+            return
+        self._send_json(HTTPStatus.NOT_FOUND, {"error": "Sayfa bulunamadı."})
 
+    def _handle_config(self) -> None:
+        missing = self.settings.missing_publish_settings
+        if not missing:
+            message = "Instagram yayını hazır."
+        elif "INSTAGRAM_ACCESS_TOKEN" in missing:
+            message = "Instagram erişim anahtarı .env dosyasında ayarlanmalı."
+        else:
+            message = "Görseller için herkese açık bir HTTPS adresi ayarlanmalı."
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "instagram_handle": self.settings.instagram_handle,
+                "publishing_enabled": self.settings.publishing_enabled,
+                "message": message,
+                "missing": list(missing),
+            },
+        )
+
+    def _handle_preview(self) -> None:
         try:
             payload = self._read_json()
             poem = payload.get("poem", "")
@@ -65,10 +101,7 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(title, str) or not isinstance(description, str):
                 raise ValueError("Başlık ve açıklama metin olmalıdır.")
 
-            lines_per_slide = payload.get(
-                "lines_per_slide",
-                DEFAULT_LINES_PER_SLIDE,
-            )
+            lines_per_slide = payload.get("lines_per_slide", DEFAULT_LINES_PER_SLIDE)
             if (
                 not isinstance(lines_per_slide, int)
                 or isinstance(lines_per_slide, bool)
@@ -107,14 +140,44 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
         except ValueError as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
+    def _handle_publish(self) -> None:
+        if not self.settings.publishing_enabled:
+            self._send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "Instagram yayını için .env ayarları tamamlanmamış."},
+            )
+            return
+        try:
+            request = PublishRequest.from_payload(self._read_json())
+            result = InstagramPublishingService(self.settings).publish(request)
+            self._send_json(
+                HTTPStatus.OK,
+                {"message": "Gönderi Instagram'da yayınlandı.", **result},
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Yayın isteği okunamadı."})
+        except (PublishValidationError, RenderError, ValueError) as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+        except InstagramAPIError as error:
+            LOGGER.warning("Instagram publish failed: %s", error)
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+        except Exception:
+            LOGGER.exception("Unexpected publishing failure")
+            self._send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": "Gönderi yayınlanırken beklenmeyen bir hata oluştu."},
+            )
+
     def _read_json(self) -> dict[str, Any]:
         raw_length = self.headers.get("Content-Length")
         if raw_length is None:
             raise ValueError("İstek içeriği eksik.")
-
-        length = int(raw_length)
-        if length > MAX_REQUEST_BYTES:
-            raise ValueError("Şiir metni bu prototip için çok büyük.")
+        try:
+            length = int(raw_length)
+        except ValueError as error:
+            raise ValueError("İstek boyutu geçersiz.") from error
+        if length < 0 or length > MAX_REQUEST_BYTES:
+            raise ValueError("İstek bu prototip için çok büyük.")
 
         payload = json.loads(self.rfile.read(length).decode("utf-8"))
         if not isinstance(payload, dict):
@@ -125,12 +188,7 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self._send_bytes(status, body, "application/json; charset=utf-8")
 
-    def _send_bytes(
-        self,
-        status: HTTPStatus,
-        body: bytes,
-        content_type: str,
-    ) -> None:
+    def _send_bytes(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -151,22 +209,54 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
 
 
 class PoetryServer(ThreadingHTTPServer):
-    """HTTP server with prompt socket reuse during local development."""
-
     allow_reuse_address = True
 
+    def __init__(self, address: tuple[str, int], settings: AppSettings) -> None:
+        self.settings = settings
+        super().__init__(address, PoetryRequestHandler)
 
-def create_server(host: str = "127.0.0.1", port: int = 8000) -> PoetryServer:
-    return PoetryServer((host, port), PoetryRequestHandler)
+
+def create_server(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    settings: AppSettings | None = None,
+) -> PoetryServer:
+    return PoetryServer((host, port), settings or AppSettings.from_env())
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    server = create_server(host=host, port=port)
-    LOGGER.info("Şiirden Karelere: http://%s:%s", host, server.server_port)
+    settings = AppSettings.from_env()
+    app_server = create_server(host=host, port=port, settings=settings)
+    media_server: PublicMediaServer | None = None
+    media_thread: threading.Thread | None = None
+
+    if settings.public_media_base_url:
+        media_server = create_media_server(
+            settings.media_dir,
+            host=settings.media_host,
+            port=settings.media_port,
+        )
+        media_thread = threading.Thread(target=media_server.serve_forever, daemon=True)
+        media_thread.start()
+        LOGGER.info(
+            "Public media origin: http://%s:%s",
+            settings.media_host,
+            media_server.server_port,
+        )
+
+    LOGGER.info("Şiirden Karelere: http://%s:%s", host, app_server.server_port)
+    if not settings.publishing_enabled:
+        LOGGER.info("Instagram publishing is not configured; preview mode remains available.")
     try:
-        server.serve_forever()
+        app_server.serve_forever()
     except KeyboardInterrupt:
         LOGGER.info("Sunucu durduruldu.")
     finally:
-        server.server_close()
+        app_server.server_close()
+        if media_server is not None:
+            media_server.shutdown()
+            media_server.server_close()
+        if media_thread is not None:
+            media_thread.join(timeout=2)
+

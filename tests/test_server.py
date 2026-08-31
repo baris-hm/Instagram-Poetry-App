@@ -1,16 +1,23 @@
 import json
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from poetry_app.server import create_server
+from poetry_app.settings import AppSettings
 
 
 class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server = create_server(port=0)
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.server = create_server(
+            port=0,
+            settings=AppSettings(media_dir=Path(cls.temp_dir.name)),
+        )
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
         cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
@@ -20,6 +27,7 @@ class ServerTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=2)
+        cls.temp_dir.cleanup()
 
     def post_json(self, path: str, payload: dict) -> tuple[int, dict]:
         request = Request(
@@ -110,6 +118,24 @@ class ServerTests(unittest.TestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(body, {"status": "ok"})
+
+    def test_config_endpoint_reports_publish_setup(self) -> None:
+        with urlopen(f"{self.base_url}/api/config") as response:
+            body = json.load(response)
+
+        self.assertEqual(response.status, 200)
+        self.assertFalse(body["publishing_enabled"])
+        self.assertEqual(body["instagram_handle"], "@handle-")
+        self.assertIn("INSTAGRAM_ACCESS_TOKEN", body["missing"])
+
+    def test_publish_endpoint_is_disabled_without_secrets(self) -> None:
+        status, body = self.post_json(
+            "/api/publish",
+            {"slides": [["Bir dize"]], "title": "", "description": ""},
+        )
+
+        self.assertEqual(status, 503)
+        self.assertIn(".env", body["error"])
 
 
 if __name__ == "__main__":

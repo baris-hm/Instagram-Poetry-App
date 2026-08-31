@@ -4,14 +4,17 @@ const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const MAX_CAROUSEL_SLIDES = 10;
 const ALLOWED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const DRAFT_STORAGE_KEY = "poetry-carousel-draft-v1";
-const INSTAGRAM_HANDLE = "@aeminatasoy";
 
 const state = {
   currentSlide: 0,
   description: "",
+  hasPublished: false,
+  instagramHandle: "@handle-",
   linesPerSlide: 4,
   maxLinesPerSlide: 4,
   photoUrl: "",
+  publishInProgress: false,
+  publishingEnabled: false,
   slides: [],
   title: "",
 };
@@ -43,6 +46,9 @@ const elements = {
   previewDescription: document.querySelector("#preview-description"),
   previewView: document.querySelector("#preview-view"),
   previousButton: document.querySelector("#previous-slide"),
+  publishButton: document.querySelector("#publish-button"),
+  publishNote: document.querySelector("#publish-note"),
+  publishResult: document.querySelector("#publish-result"),
   quatrainCount: document.querySelector("#quatrain-count"),
   quatrainLayout: document.querySelector("#quatrain-layout"),
   removePhoto: document.querySelector("#remove-photo"),
@@ -257,7 +263,9 @@ function applyPreviewData(data) {
   state.linesPerSlide = data.lines_per_slide;
   state.maxLinesPerSlide = data.max_lines_per_slide;
   state.slides = data.slides.map(makeSlide);
+  state.hasPublished = false;
   selectLayout(state.linesPerSlide);
+  updatePublishAvailability();
 }
 
 async function applyLayout(linesPerSlide) {
@@ -364,7 +372,7 @@ function renderCarousel() {
 
     const handle = document.createElement("span");
     handle.className = "slide-handle";
-    handle.textContent = INSTAGRAM_HANDLE;
+    handle.textContent = state.instagramHandle;
 
     const number = document.createElement("span");
     number.className = "slide-number";
@@ -529,8 +537,10 @@ function moveLine(sourceIndex, lineIndex, direction) {
   }
 
   state.currentSlide = targetIndex;
+  state.hasPublished = false;
   saveDraft();
   renderPreview();
+  updatePublishAvailability();
 }
 
 function renderCaption() {
@@ -591,6 +601,107 @@ function handleCarouselKeydown(event) {
   }
 }
 
+async function loadPublishingConfig() {
+  try {
+    const response = await fetch("/api/config");
+    const config = await response.json();
+    state.publishingEnabled = Boolean(config.publishing_enabled);
+    state.instagramHandle = config.instagram_handle || "@handle-";
+    elements.publishNote.textContent = config.message || "Instagram yayın ayarları eksik.";
+    if (!elements.previewView.hidden && state.slides.length > 0) {
+      renderCarousel();
+      updateNavigation();
+    }
+  } catch {
+    state.publishingEnabled = false;
+    elements.publishNote.textContent = "Instagram yayın ayarları okunamadı.";
+  }
+  updatePublishAvailability();
+}
+
+function updatePublishAvailability() {
+  elements.publishButton.disabled = !state.publishingEnabled
+    || state.slides.length === 0
+    || state.publishInProgress
+    || state.hasPublished;
+}
+
+function selectedPhotoAsDataUrl() {
+  const file = elements.photo.files[0];
+  if (!file) {
+    return Promise.resolve("");
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")), { once: true });
+    reader.addEventListener("error", () => reject(new Error("Fotoğraf okunamadı.")), { once: true });
+    reader.readAsDataURL(file);
+  });
+}
+
+function showPublishResult(message, { error = false, permalink = "" } = {}) {
+  elements.publishResult.replaceChildren();
+  elements.publishResult.hidden = false;
+  elements.publishResult.classList.toggle("is-error", error);
+  elements.publishResult.append(document.createTextNode(message));
+  if (permalink.startsWith("https://")) {
+    elements.publishResult.append(document.createTextNode(" "));
+    const link = document.createElement("a");
+    link.href = permalink;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Gönderiyi aç";
+    elements.publishResult.append(link);
+  }
+}
+
+async function publishPost() {
+  if (!state.publishingEnabled || state.publishInProgress || state.hasPublished) {
+    return;
+  }
+  const total = visibleSlideCount();
+  const confirmed = window.confirm(
+    `${total} kare şimdi Instagram'da yayınlanacak. Devam edilsin mi?`,
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  state.publishInProgress = true;
+  elements.publishButton.textContent = "Instagram'a gönderiliyor…";
+  elements.publishResult.hidden = true;
+  updatePublishAvailability();
+
+  try {
+    const photoDataUrl = await selectedPhotoAsDataUrl();
+    const response = await fetch("/api/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description: state.description,
+        photo_data_url: photoDataUrl,
+        slides: state.slides.map((slide) => slide.lines),
+        title: state.title,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Gönderi yayınlanamadı.");
+    }
+    state.hasPublished = true;
+    elements.publishButton.textContent = "Instagram'da yayınlandı";
+    showPublishResult(result.message || "Gönderi Instagram'da yayınlandı.", {
+      permalink: result.permalink || "",
+    });
+  } catch (error) {
+    elements.publishButton.textContent = "Instagram'da yayınla";
+    showPublishResult(error.message || "Gönderi yayınlanamadı.", { error: true });
+  } finally {
+    state.publishInProgress = false;
+    updatePublishAvailability();
+  }
+}
+
 elements.form.addEventListener("submit", createPreview);
 elements.poem.addEventListener("input", () => {
   updatePoemCount();
@@ -598,6 +709,7 @@ elements.poem.addEventListener("input", () => {
 });
 elements.quatrainLayout.addEventListener("click", () => applyLayout(4));
 elements.coupletLayout.addEventListener("click", () => applyLayout(2));
+elements.publishButton.addEventListener("click", publishPost);
 elements.photo.addEventListener("change", handlePhotoSelection);
 elements.removePhoto.addEventListener("click", clearPhoto);
 elements.backButton.addEventListener("click", () => showComposer({ updateHistory: true }));
@@ -616,6 +728,7 @@ window.addEventListener("popstate", () => {
 
 updatePoemCount();
 updateLayoutControls();
+loadPublishingConfig();
 if (window.location.pathname === "/preview" && restoreDraft()) {
   showPreview();
 }

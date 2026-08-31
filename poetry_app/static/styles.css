@@ -828,6 +828,28 @@ textarea:focus {
   font-size: 13px;
 }
 
+.publish-result {
+  margin-top: 14px;
+  padding: 13px 15px;
+  border: 1px solid #b8c8bc;
+  border-radius: 11px;
+  color: #294534;
+  background: #edf4ee;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.publish-result.is-error {
+  border-color: #dfb4aa;
+  color: #7a2318;
+  background: #fbe6e0;
+}
+
+.publish-result a {
+  color: inherit;
+  font-weight: 800;
+}
+
 footer {
   display: flex;
   justify-content: space-between;
