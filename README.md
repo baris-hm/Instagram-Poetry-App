@@ -50,23 +50,9 @@ Git, or send it to the public media host.
 
 ### Give Instagram access to the rendered JPEGs
 
-Instagram downloads every publish image from a public HTTPS URL. For local
-development, expose **only port 8001**, using an HTTPS tunnel such as
-Cloudflare Tunnel or ngrok. Keep the application on port 8000 local.
-
-One Cloudflare quick-tunnel workflow is:
-
-```bash
-cloudflared tunnel --url http://127.0.0.1:8001
-```
-
-Copy the generated `https://...trycloudflare.com` address into
-`PUBLIC_MEDIA_BASE_URL`. The tunnel may be started before the Python server; if
-it initially reports that the local origin is unavailable, leave it running and
-start the app next. Restart the Python app whenever `.env` changes.
-
-For a stable setup, use an HTTPS host or a named tunnel whose public address does
-not change between restarts.
+Instagram downloads every publish image from a public HTTPS URL. 
+For a stable setup, use an HTTPS host or a named tunnel whose public address does not change between restarts. 
+I used "Google Cloud Run" for my version with defined billing options.
 
 ### Deploy to Google Cloud Run
 
