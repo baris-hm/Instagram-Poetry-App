@@ -22,7 +22,12 @@
           <small>Instagram şiir hazırlayıcı</small>
         </span>
       </a>
-      <span class="prototype-badge">Prototip</span>
+      <div class="header-actions">
+        <span class="prototype-badge">Prototip</span>
+        <form method="post" action="/logout">
+          <button class="logout-button" type="submit">Çıkış</button>
+        </form>
+      </div>
     </header>
 
     <main id="main-content">
@@ -137,6 +142,33 @@
                   <strong>Beyit görünümü</strong>
                   <span id="couplet-count">2 satırla başlayan kareler</span>
                 </button>
+                <button
+                  id="bent-layout"
+                  class="layout-option"
+                  type="button"
+                  aria-pressed="false"
+                  aria-describedby="layout-status"
+                >
+                  <strong>Bent görünümü</strong>
+                  <span id="bent-count">9 kareye kadar dengeli dağılım</span>
+                </button>
+              </div>
+              <div id="bent-modes" class="bent-modes" hidden>
+                <span class="bent-modes-label">Bent düzeni</span>
+                <div class="bent-mode-options" role="group" aria-label="Bent düzeni">
+                  <button class="bent-mode-option is-selected" type="button" data-bent-mode="automatic" aria-pressed="true">
+                    Otomatik
+                  </button>
+                  <button class="bent-mode-option" type="button" data-bent-mode="5" aria-pressed="false">
+                    5'lik
+                  </button>
+                  <button class="bent-mode-option" type="button" data-bent-mode="6" aria-pressed="false">
+                    6'lık
+                  </button>
+                  <button class="bent-mode-option" type="button" data-bent-mode="7" aria-pressed="false">
+                    7'lik
+                  </button>
+                </div>
               </div>
               <p id="layout-status" class="layout-status" aria-live="polite">
                 Görünümü değiştirmek satır yerleşimini yeniden oluşturur.
@@ -174,8 +206,8 @@
               <span id="current-slide-label" class="slide-label">Kare 1</span>
             </div>
             <div id="line-list" class="line-list"></div>
-            <p class="editor-help">
-              Sırayı korumak için yalnızca ilk ve son satır taşınabilir. Her kare, görünümden bağımsız olarak en fazla dört satır alır.
+            <p id="editor-help" class="editor-help">
+              Sırayı korumak için yalnızca ilk ve son satır taşınabilir. Bu görünümde her kare en fazla dört satır alır.
             </p>
           </aside>
         </div>

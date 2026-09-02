@@ -2,6 +2,8 @@
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const MAX_CAROUSEL_SLIDES = 10;
+const MAX_BENT_SLIDES = 9;
+const MAX_VERSES = 63;
 const ALLOWED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const DRAFT_STORAGE_KEY = "poetry-carousel-draft-v1";
 
@@ -10,7 +12,8 @@ const state = {
   description: "",
   hasPublished: false,
   instagramHandle: "@handle-",
-  linesPerSlide: 4,
+  layout: "quatrain",
+  bentMode: "automatic",
   maxLinesPerSlide: 4,
   photoUrl: "",
   publishInProgress: false,
@@ -28,8 +31,13 @@ const elements = {
   composerView: document.querySelector("#composer-view"),
   createButton: document.querySelector("#create-preview"),
   description: document.querySelector("#description"),
+  editorHelp: document.querySelector("#editor-help"),
   error: document.querySelector("#form-error"),
   form: document.querySelector("#poem-form"),
+  bentCount: document.querySelector("#bent-count"),
+  bentLayout: document.querySelector("#bent-layout"),
+  bentModes: document.querySelector("#bent-modes"),
+  bentModeButtons: [...document.querySelectorAll("[data-bent-mode]")],
   coupletCount: document.querySelector("#couplet-count"),
   coupletLayout: document.querySelector("#couplet-layout"),
   layoutStatus: document.querySelector("#layout-status"),
@@ -93,39 +101,96 @@ function countPoemSlides(poem, linesPerSlide) {
   }, 0);
 }
 
+function countPoemLines(poem) {
+  return poem.replace(/\r\n?/g, "\n").split("\n").filter((line) => line.trim()).length;
+}
+
 function totalSlidesFor(linesPerSlide) {
   return countPoemSlides(elements.poem.value, linesPerSlide) + (state.photoUrl ? 1 : 0);
 }
 
-function selectLayout(linesPerSlide) {
-  if (linesPerSlide === 2 && elements.coupletLayout.disabled) {
-    return;
-  }
-  state.linesPerSlide = linesPerSlide;
-  elements.quatrainLayout.classList.toggle("is-selected", linesPerSlide === 4);
-  elements.coupletLayout.classList.toggle("is-selected", linesPerSlide === 2);
-  elements.quatrainLayout.setAttribute("aria-pressed", String(linesPerSlide === 4));
-  elements.coupletLayout.setAttribute("aria-pressed", String(linesPerSlide === 2));
+function automaticBentSlideCount(verseCount) {
+  return Math.min(verseCount, MAX_BENT_SLIDES);
+}
+
+function selectLayout(layout, bentMode = state.bentMode) {
+  state.layout = layout;
+  state.bentMode = String(bentMode || "automatic");
+  elements.quatrainLayout.classList.toggle("is-selected", layout === "quatrain");
+  elements.coupletLayout.classList.toggle("is-selected", layout === "couplet");
+  elements.bentLayout.classList.toggle("is-selected", layout === "bent");
+  elements.quatrainLayout.setAttribute("aria-pressed", String(layout === "quatrain"));
+  elements.coupletLayout.setAttribute("aria-pressed", String(layout === "couplet"));
+  elements.bentLayout.setAttribute("aria-pressed", String(layout === "bent"));
+  elements.bentModes.hidden = layout !== "bent";
+  elements.bentModeButtons.forEach((button) => {
+    const selected = button.dataset.bentMode === state.bentMode;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
 }
 
 function updateLayoutControls() {
   const hasPoem = Boolean(elements.poem.value.trim());
+  const verseCount = countPoemLines(elements.poem.value);
   const quatrainTotal = totalSlidesFor(4);
   const coupletTotal = totalSlidesFor(2);
+  const automaticBentTotal = automaticBentSlideCount(verseCount) + (state.photoUrl ? 1 : 0);
+  const fixedBentSize = Number(state.bentMode);
+  const selectedBentTotal = state.bentMode === "automatic"
+    ? automaticBentTotal
+    : Math.ceil(verseCount / fixedBentSize) + (state.photoUrl ? 1 : 0);
   elements.quatrainCount.textContent = hasPoem
     ? `${quatrainTotal} kare${state.photoUrl ? " · fotoğraf dahil" : ""}`
     : "Her karede 4 satır";
   elements.coupletCount.textContent = hasPoem
     ? `${coupletTotal} kare${state.photoUrl ? " · fotoğraf dahil" : ""}`
     : "Her karede 2 satır";
+  elements.bentCount.textContent = hasPoem
+    ? `${state.bentMode === "automatic" ? "Otomatik" : `${state.bentMode}'lik`}: ${selectedBentTotal} kare${state.photoUrl ? " · fotoğraf dahil" : ""}`
+    : "9 kareye kadar dengeli dağılım";
 
   const coupletExceedsLimit = hasPoem && coupletTotal > MAX_CAROUSEL_SLIDES;
-  elements.coupletLayout.disabled = coupletExceedsLimit;
+  const quatrainExceedsLimit = hasPoem
+    && (verseCount >= 37 || quatrainTotal > MAX_CAROUSEL_SLIDES);
+  const poemExceedsLimit = verseCount > MAX_VERSES;
+  elements.quatrainLayout.disabled = quatrainExceedsLimit || poemExceedsLimit;
+  elements.coupletLayout.disabled = coupletExceedsLimit || poemExceedsLimit;
+  elements.bentLayout.disabled = poemExceedsLimit;
+  elements.bentModeButtons.forEach((button) => {
+    const mode = button.dataset.bentMode;
+    const fixedSize = Number(mode);
+    const exceedsModeLimit = mode !== "automatic" && verseCount > fixedSize * MAX_BENT_SLIDES;
+    button.disabled = poemExceedsLimit || exceedsModeLimit;
+    button.title = exceedsModeLimit
+      ? `${mode}'lik düzen en fazla ${fixedSize * MAX_BENT_SLIDES} dize destekler.`
+      : "";
+  });
 
-  elements.layoutStatus.classList.toggle("is-warning", coupletExceedsLimit);
-  elements.layoutStatus.textContent = coupletExceedsLimit
-    ? `Beyit görünümü ${coupletTotal} kare oluşturur; 10 kare sınırını aştığı için kullanılamaz.`
-    : "Görünümü değiştirmek satır yerleşimini yeniden oluşturur. Fotoğraf dahil en fazla 10 kare hazırlanabilir.";
+  const hasWarning = poemExceedsLimit
+    || (state.layout === "couplet" && coupletExceedsLimit)
+    || (state.layout === "quatrain" && quatrainExceedsLimit);
+  elements.layoutStatus.classList.toggle("is-warning", hasWarning);
+  if (poemExceedsLimit) {
+    elements.layoutStatus.textContent = `Bu şiir ${verseCount} dize; önizleme en fazla 63 dize destekler.`;
+  } else if (verseCount >= 37) {
+    const bentDescription = state.bentMode === "automatic"
+      ? "Otomatik düzen dizeleri 9 şiir karesine dengeli dağıtır; fazla dizeler son karelere eklenir."
+      : `${state.bentMode}'lik düzen kareleri ${state.bentMode} dizeyle doldurur; son kare kalan dizeleri alır.`;
+    elements.layoutStatus.textContent = state.layout === "bent"
+      ? `${bentDescription} Dörtlük görünümü 37 dizeden itibaren kullanılamaz.`
+      : "37 veya daha fazla dizede Bent görünümü kullanılır; Dörtlük görünümü kullanılamaz.";
+  } else if (state.layout === "couplet" && coupletExceedsLimit) {
+    elements.layoutStatus.textContent = `Beyit görünümü ${coupletTotal} kare oluşturur; 10 kare sınırını aştığı için kullanılamaz.`;
+  } else if (state.layout === "quatrain" && quatrainExceedsLimit) {
+    elements.layoutStatus.textContent = `Dörtlük görünümü ${quatrainTotal} kare oluşturur; 10 kare sınırını aştığı için kullanılamaz.`;
+  } else if (state.layout === "bent") {
+    elements.layoutStatus.textContent = state.bentMode === "automatic"
+      ? "Otomatik düzen dizeleri en fazla 9 şiir karesine dengeli dağıtır; fazla dizeler son karelere eklenir."
+      : `${state.bentMode}'lik düzen kareleri ${state.bentMode} dizeyle doldurur; son kare kalan dizeleri alır.`;
+  } else {
+    elements.layoutStatus.textContent = "Görünümü değiştirmek satır yerleşimini yeniden oluşturur. Fotoğraf dahil en fazla 10 kare hazırlanabilir.";
+  }
 }
 
 function clearPhoto() {
@@ -173,8 +238,9 @@ function handlePhotoSelection() {
 
 function saveDraft() {
   const draft = {
+    bentMode: state.bentMode,
     description: state.description,
-    linesPerSlide: state.linesPerSlide,
+    layout: state.layout,
     maxLinesPerSlide: state.maxLinesPerSlide,
     poem: elements.poem.value,
     slides: state.slides,
@@ -195,15 +261,20 @@ function restoreDraft() {
     }
     state.title = typeof saved.title === "string" ? saved.title : "";
     state.description = typeof saved.description === "string" ? saved.description : "";
-    state.linesPerSlide = saved.linesPerSlide === 2 ? 2 : 4;
-    state.maxLinesPerSlide = 4;
+    state.layout = ["couplet", "quatrain", "bent"].includes(saved.layout)
+      ? saved.layout
+      : (saved.linesPerSlide === 2 ? "couplet" : "quatrain");
+    state.bentMode = ["automatic", "5", "6", "7"].includes(String(saved.bentMode))
+      ? String(saved.bentMode)
+      : "automatic";
+    state.maxLinesPerSlide = state.layout === "bent" ? 7 : 4;
     state.slides = saved.slides.map((slide) => makeSlide(slide.lines ?? []));
     elements.title.value = state.title;
     elements.description.value = state.description;
     elements.poem.value = typeof saved.poem === "string" ? saved.poem : "";
     updatePoemCount();
     updateLayoutControls();
-    selectLayout(state.linesPerSlide);
+    selectLayout(state.layout, state.bentMode);
     return true;
   } catch {
     return false;
@@ -225,7 +296,8 @@ async function createPreview(event) {
   elements.createButton.querySelector("span:first-child").textContent = "Hazırlanıyor…";
 
   try {
-    const data = await requestPreview(4);
+    const defaultLayout = countPoemLines(poem) >= 37 ? "bent" : "quatrain";
+    const data = await requestPreview(defaultLayout, "automatic");
     applyPreviewData(data);
     state.currentSlide = 0;
     saveDraft();
@@ -238,7 +310,7 @@ async function createPreview(event) {
   }
 }
 
-async function requestPreview(linesPerSlide) {
+async function requestPreview(layout, bentMode = "automatic") {
   const response = await fetch("/api/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -247,7 +319,8 @@ async function requestPreview(linesPerSlide) {
       title: elements.title.value,
       description: elements.description.value,
       has_photo: Boolean(state.photoUrl),
-      lines_per_slide: linesPerSlide,
+      layout,
+      bent_mode: bentMode,
     }),
   });
   const data = await response.json();
@@ -260,30 +333,40 @@ async function requestPreview(linesPerSlide) {
 function applyPreviewData(data) {
   state.title = data.title;
   state.description = data.description;
-  state.linesPerSlide = data.lines_per_slide;
+  state.layout = data.layout;
+  state.bentMode = data.bent_mode || state.bentMode || "automatic";
   state.maxLinesPerSlide = data.max_lines_per_slide;
   state.slides = data.slides.map(makeSlide);
   state.hasPublished = false;
-  selectLayout(state.linesPerSlide);
+  selectLayout(state.layout, state.bentMode);
   updatePublishAvailability();
 }
 
-async function applyLayout(linesPerSlide) {
-  if (linesPerSlide === state.linesPerSlide) {
+async function applyLayout(layout, bentMode = state.bentMode) {
+  const normalizedBentMode = String(bentMode || "automatic");
+  if (layout === state.layout && (layout !== "bent" || normalizedBentMode === state.bentMode)) {
     return;
   }
-  if (linesPerSlide === 2 && elements.coupletLayout.disabled) {
+  const selectedControl = layout === "quatrain"
+    ? elements.quatrainLayout
+    : (layout === "couplet" ? elements.coupletLayout : elements.bentLayout);
+  const selectedBentControl = elements.bentModeButtons.find(
+    (button) => button.dataset.bentMode === normalizedBentMode,
+  );
+  if (selectedControl.disabled || (layout === "bent" && selectedBentControl?.disabled)) {
     return;
   }
 
   elements.quatrainLayout.disabled = true;
   elements.coupletLayout.disabled = true;
+  elements.bentLayout.disabled = true;
+  elements.bentModeButtons.forEach((button) => { button.disabled = true; });
   elements.layoutStatus.classList.remove("is-warning");
   elements.layoutStatus.textContent = "Görünüm hazırlanıyor…";
   let failureMessage = "";
 
   try {
-    const data = await requestPreview(linesPerSlide);
+    const data = await requestPreview(layout, normalizedBentMode);
     applyPreviewData(data);
     state.currentSlide = 0;
     saveDraft();
@@ -291,7 +374,6 @@ async function applyLayout(linesPerSlide) {
   } catch (error) {
     failureMessage = error.message || "Görünüm değiştirilemedi.";
   } finally {
-    elements.quatrainLayout.disabled = false;
     updateLayoutControls();
     if (failureMessage) {
       elements.layoutStatus.classList.add("is-warning");
@@ -310,7 +392,7 @@ function showPreview({ updateHistory = false } = {}) {
     history.pushState({ view: "preview" }, "", "/preview");
   }
   updateLayoutControls();
-  selectLayout(state.linesPerSlide);
+  selectLayout(state.layout, state.bentMode);
   renderPreview();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -418,6 +500,8 @@ function appendCarouselDot(index, total) {
 function renderLineEditor() {
   elements.lineList.replaceChildren();
   elements.slideLabel.textContent = `Kare ${state.currentSlide + 1}`;
+  const capacityLabel = state.maxLinesPerSlide === 7 ? "yedi" : "dört";
+  elements.editorHelp.textContent = `Sırayı korumak için yalnızca ilk ve son satır taşınabilir. Bu görünümde her kare en fazla ${capacityLabel} satır alır.`;
 
   const poemSlideIndex = state.currentSlide;
   if (poemSlideIndex >= state.slides.length) {
@@ -475,12 +559,19 @@ function renderLineEditor() {
         );
         const nextSlide = state.slides[poemSlideIndex + 1];
         const movingWouldHaveNoEffect = !nextSlide && slide.lines.length === 1;
+        const movingWouldExceedSlideLimit = !nextSlide
+          && visibleSlideCount() >= MAX_CAROUSEL_SLIDES;
         next.disabled = movingWouldHaveNoEffect
+          || movingWouldExceedSlideLimit
           || Boolean(nextSlide && nextSlide.lines.length >= state.maxLinesPerSlide);
         if (next.disabled) {
-          next.title = movingWouldHaveNoEffect
-            ? "Taşınacak başka bir şiir karesi yok."
-            : `Sonraki kare en fazla ${state.maxLinesPerSlide} satır alabilir.`;
+          if (movingWouldHaveNoEffect) {
+            next.title = "Taşınacak başka bir şiir karesi yok.";
+          } else if (movingWouldExceedSlideLimit) {
+            next.title = "Fotoğraf dahil en fazla 10 kare hazırlanabilir.";
+          } else {
+            next.title = `Sonraki kare en fazla ${state.maxLinesPerSlide} satır alabilir.`;
+          }
         }
         actions.append(next);
       }
@@ -511,6 +602,7 @@ function moveLine(sourceIndex, lineIndex, direction) {
     || (direction < 0 && !existingTarget)
     || (existingTarget && existingTarget.lines.length >= state.maxLinesPerSlide)
     || (direction > 0 && !existingTarget && source.lines.length === 1)
+    || (direction > 0 && !existingTarget && visibleSlideCount() >= MAX_CAROUSEL_SLIDES)
   ) {
     return;
   }
@@ -707,8 +799,12 @@ elements.poem.addEventListener("input", () => {
   updatePoemCount();
   updateLayoutControls();
 });
-elements.quatrainLayout.addEventListener("click", () => applyLayout(4));
-elements.coupletLayout.addEventListener("click", () => applyLayout(2));
+elements.quatrainLayout.addEventListener("click", () => applyLayout("quatrain"));
+elements.coupletLayout.addEventListener("click", () => applyLayout("couplet"));
+elements.bentLayout.addEventListener("click", () => applyLayout("bent", state.bentMode));
+elements.bentModeButtons.forEach((button) => {
+  button.addEventListener("click", () => applyLayout("bent", button.dataset.bentMode));
+});
 elements.publishButton.addEventListener("click", publishPost);
 elements.photo.addEventListener("change", handlePhotoSelection);
 elements.removePhoto.addEventListener("click", clearPhoto);

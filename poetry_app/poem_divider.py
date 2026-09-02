@@ -11,7 +11,20 @@ from __future__ import annotations
 import re
 
 DEFAULT_LINES_PER_SLIDE = 4
+MAX_BENT_SLIDES = 9
+BENT_LINE_COUNTS = {5, 6, 7}
 _STANZA_BREAK = re.compile(r"\n\s*\n+")
+
+
+def poem_lines(poem: str) -> list[str]:
+    """Return every non-empty poem line in its original order."""
+
+    if not isinstance(poem, str):
+        raise TypeError("poem must be a string")
+    normalized = poem.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return []
+    return [line.strip() for line in normalized.split("\n") if line.strip()]
 
 
 def divide_poem(
@@ -52,3 +65,41 @@ def divide_poem(
 
     return slides
 
+
+def divide_bent_poem(
+    poem: str,
+    *,
+    mode: str | int = "automatic",
+    slide_count: int = MAX_BENT_SLIDES,
+) -> list[list[str]]:
+    """Divide a poem for Bent view while preserving the order of its lines.
+
+    Automatic mode balances the lines across at most nine non-empty slides and
+    puts the extra lines on the final slides. Fixed modes chunk the poem into
+    groups of five, six, or seven lines.
+    """
+
+    if slide_count < 1:
+        raise ValueError("slide_count must be at least 1")
+
+    lines = poem_lines(poem)
+    if not lines:
+        return []
+
+    if mode == "automatic":
+        base_size, remainder = divmod(len(lines), slide_count)
+        sizes = [base_size] * (slide_count - remainder) + [base_size + 1] * remainder
+    elif isinstance(mode, int) and not isinstance(mode, bool) and mode in BENT_LINE_COUNTS:
+        sizes = [mode] * (len(lines) // mode)
+        if len(lines) % mode:
+            sizes.append(len(lines) % mode)
+    else:
+        raise ValueError("Bent mode must be automatic, 5, 6, or 7")
+
+    slides: list[list[str]] = []
+    line_index = 0
+    for size in sizes:
+        if size:
+            slides.append(lines[line_index : line_index + size])
+            line_index += size
+    return slides

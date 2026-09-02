@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 from .server import run_server
 
@@ -18,9 +19,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--port",
-        default=8000,
+        default=int(os.getenv("PORT", "8000")),
         type=int,
-        help="Port to listen on (default: 8000).",
+        help="Port to listen on (default: PORT environment variable or 8000).",
     )
     return parser
 
@@ -32,4 +33,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

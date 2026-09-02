@@ -9,6 +9,9 @@ from .instagram_client import InstagramClient
 from .renderer import CarouselRenderer, RenderedMedia
 from .settings import AppSettings
 
+MAX_LINES_PER_POEM_SLIDE = 7
+MAX_POEM_LINES = 63
+
 
 class PublishValidationError(ValueError):
     pass
@@ -29,8 +32,11 @@ class PublishRequest:
 
         slides: list[list[str]] = []
         for raw_slide in raw_slides:
-            if not isinstance(raw_slide, list) or not 1 <= len(raw_slide) <= 4:
-                raise PublishValidationError("Her şiir karesi 1 ile 4 satır içermelidir.")
+            if (
+                not isinstance(raw_slide, list)
+                or not 1 <= len(raw_slide) <= MAX_LINES_PER_POEM_SLIDE
+            ):
+                raise PublishValidationError("Her şiir karesi 1 ile 7 satır içermelidir.")
             lines: list[str] = []
             for raw_line in raw_slide:
                 if not isinstance(raw_line, str) or not raw_line.strip():
@@ -39,6 +45,9 @@ class PublishRequest:
                     raise PublishValidationError("Bir şiir satırı çok uzun.")
                 lines.append(raw_line.strip())
             slides.append(lines)
+
+        if sum(len(slide) for slide in slides) > MAX_POEM_LINES:
+            raise PublishValidationError("Yayınlanacak şiir en fazla 63 dize içermelidir.")
 
         title = payload.get("title", "")
         description = payload.get("description", "")
@@ -71,7 +80,7 @@ class InstagramPublishingService:
             settings.instagram_handle,
         )
         self.client = InstagramClient(
-            settings.instagram_access_token,
+            settings.get_instagram_access_token(),
             api_version=settings.graph_api_version,
             base_url=settings.graph_api_base_url,
             user_id=settings.instagram_user_id,

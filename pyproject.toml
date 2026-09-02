@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "instagram-poetry-prototype"
-version = "0.2.1"
+version = "0.4.0"
 description = "A small Turkish-poem to Instagram-carousel prototype"
 requires-python = ">=3.11"
-dependencies = ["Pillow>=10,<13"]
+dependencies = ["Pillow>=10,<13", "google-cloud-secret-manager>=2,<3"]
 
 [project.scripts]
 poetry-carousel = "poetry_app.__main__:main"

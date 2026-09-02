@@ -10,6 +10,15 @@ from pathlib import Path
 _MEDIA_PATH = re.compile(r"^/media/([a-f0-9]{32}\.jpg)$")
 
 
+def resolve_public_media_path(media_dir: Path, request_path: str) -> Path | None:
+    """Resolve an allowed public JPEG URL without accepting arbitrary paths."""
+
+    match = _MEDIA_PATH.fullmatch(request_path)
+    if match is None:
+        return None
+    return media_dir / match.group(1)
+
+
 class PublicMediaRequestHandler(BaseHTTPRequestHandler):
     server_version = "PoetryMedia/0.1"
 
@@ -21,11 +30,10 @@ class PublicMediaRequestHandler(BaseHTTPRequestHandler):
 
     def _serve(self, *, include_body: bool) -> None:
         path = self.path.split("?", maxsplit=1)[0]
-        match = _MEDIA_PATH.fullmatch(path)
-        if match is None:
+        file_path = resolve_public_media_path(self.server.media_dir, path)  # type: ignore[attr-defined]
+        if file_path is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        file_path = self.server.media_dir / match.group(1)  # type: ignore[attr-defined]
         try:
             body = file_path.read_bytes()
         except FileNotFoundError:
@@ -60,4 +68,3 @@ def create_media_server(
     port: int = 8001,
 ) -> PublicMediaServer:
     return PublicMediaServer((host, port), media_dir)
-

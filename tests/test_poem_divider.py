@@ -1,6 +1,6 @@
 import unittest
 
-from poetry_app.poem_divider import divide_poem
+from poetry_app.poem_divider import divide_bent_poem, divide_poem, poem_lines
 
 
 class DividePoemTests(unittest.TestCase):
@@ -45,7 +45,37 @@ class DividePoemTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             divide_poem("Bir", lines_per_slide=0)
 
+    def test_poem_lines_ignores_blank_stanza_separators(self) -> None:
+        self.assertEqual(poem_lines(" Bir \n\n İki\n  \nÜç "), ["Bir", "İki", "Üç"])
+
+    def test_automatic_bent_mode_balances_extra_lines_at_the_end(self) -> None:
+        poem = "\n".join(f"Dize {number}" for number in range(1, 45))
+
+        slides = divide_bent_poem(poem)
+
+        self.assertEqual([len(slide) for slide in slides], [4, 5, 5, 5, 5, 5, 5, 5, 5])
+        self.assertEqual(slides[0][0], "Dize 1")
+        self.assertEqual(slides[-1][-1], "Dize 44")
+
+    def test_automatic_bent_mode_divides_37_lines_as_specified(self) -> None:
+        poem = "\n".join(f"Dize {number}" for number in range(1, 38))
+
+        self.assertEqual(
+            [len(slide) for slide in divide_bent_poem(poem)],
+            [4, 4, 4, 4, 4, 4, 4, 4, 5],
+        )
+
+    def test_fixed_bent_mode_keeps_a_remainder_on_the_last_slide(self) -> None:
+        poem = "\n".join(f"Dize {number}" for number in range(1, 38))
+
+        self.assertEqual(
+            [len(slide) for slide in divide_bent_poem(poem, mode=5)],
+            [5, 5, 5, 5, 5, 5, 5, 2],
+        )
+
+    def test_automatic_bent_mode_does_not_create_empty_slides_for_short_poems(self) -> None:
+        self.assertEqual(divide_bent_poem("Bir\nİki\nÜç"), [["Bir"], ["İki"], ["Üç"]])
+
 
 if __name__ == "__main__":
     unittest.main()
-

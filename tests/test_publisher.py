@@ -3,7 +3,11 @@ import unittest
 from pathlib import Path
 
 from poetry_app.instagram_client import InstagramAPIError, PublishedPost
-from poetry_app.publisher import InstagramPublishingService, PublishRequest
+from poetry_app.publisher import (
+    InstagramPublishingService,
+    PublishRequest,
+    PublishValidationError,
+)
 from poetry_app.renderer import RenderedMedia
 from poetry_app.settings import AppSettings
 
@@ -76,6 +80,28 @@ class PublisherTests(unittest.TestCase):
                 service.publish(self.request())
 
         self.assertFalse(renderer.deleted)
+
+    def test_publish_request_accepts_seven_line_bent_slide(self) -> None:
+        lines = [f"Dize {number}" for number in range(1, 8)]
+
+        request = PublishRequest.from_payload({"slides": [lines]})
+
+        self.assertEqual(request.slides, [lines])
+
+    def test_publish_request_rejects_more_than_seven_lines_per_slide(self) -> None:
+        lines = [f"Dize {number}" for number in range(1, 9)]
+
+        with self.assertRaises(PublishValidationError):
+            PublishRequest.from_payload({"slides": [lines]})
+
+    def test_publish_request_rejects_more_than_63_total_lines(self) -> None:
+        slides = [
+            [f"Dize {slide * 7 + line}" for line in range(1, 8)]
+            for slide in range(10)
+        ]
+
+        with self.assertRaises(PublishValidationError):
+            PublishRequest.from_payload({"slides": slides})
 
 
 if __name__ == "__main__":

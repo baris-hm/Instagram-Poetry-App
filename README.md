@@ -7,8 +7,9 @@ carousel and publishes the finished images through the Instagram API.
 
 - Large poem input with optional title, description, and photograph
 - Replaceable Turkish stanza divider in `poetry_app/poem_divider.py`
-- Touch/swipe carousel preview with preview-only dörtlük and beyit layouts
-- Order-safe line movement with a four-line capacity on every poem slide
+- Touch/swipe carousel preview with dörtlük, beyit, and Bent layouts
+- Automatic and fixed 5-, 6-, or 7-line Bent grouping for poems up to 63 lines
+- Order-safe line movement with a layout-aware four- or seven-line capacity
 - Dynamic 10-slide validation that counts the optional photograph
 - Configurable Instagram handle on every poem slide
 - Complete, uncropped photograph as the final slide, without text or filters
@@ -66,6 +67,27 @@ start the app next. Restart the Python app whenever `.env` changes.
 
 For a stable setup, use an HTTPS host or a named tunnel whose public address does
 not change between restarts.
+
+### Deploy to Google Cloud Run
+
+The repository includes a `Dockerfile` for Cloud Run. The hosted service serves
+temporary randomized JPEG URLs from the same public port and disables the
+second local media server. See `CLOUD_RUN.md` for the browser-based deployment
+steps and required single-instance configuration.
+
+Do not configure the real Instagram access token on a public deployment until
+user authentication has been added. Without it, anyone who discovers the
+service URL could call the publishing endpoint.
+
+Hosted deployments can set `APP_PASSWORD` and `APP_SESSION_SECRET` together to
+enable the single-user login. Cloud Run should inject both from Secret Manager.
+The signed login is remembered for 30 days by default; health checks and
+randomized temporary media URLs remain public.
+
+For a hosted app that does not require manual token replacement, mount the
+Instagram token as a latest-version Secret Manager file and schedule the included
+refresh job. See `TOKEN_RENEWAL.md` for the deployment and least-privilege IAM
+steps.
 
 ## Run and publish
 
@@ -126,15 +148,20 @@ tests/                   # Divider, server, renderer, settings and API tests
 
 ## Current layout policy
 
-The divider normalizes line endings, separates stanzas at blank lines, and
-chunks each stanza into groups of two or four non-empty lines. It does not
-combine separate stanzas.
+The divider normalizes line endings. Dörtlük and beyit views preserve blank-line
+stanza boundaries and chunk each stanza into groups of four or two non-empty
+lines. Bent view preserves line order while distributing all lines across the
+poem slides.
 
-The preview starts in dörtlük view. Beyit view initially groups two lines per
-slide, while the editor still permits up to four. Only the first line can move
-backward and only the last line can move forward. Switching layouts rebuilds
-the grouping from the original poem and resets manual moves. Beyit view is
-unavailable when its poem slides plus the optional photo exceed 10 slides.
+The preview starts in Dörtlük view through 36 lines and switches to automatic
+Bent view at 37 lines. Dörtlük is then unavailable. Automatic Bent view balances
+up to 63 lines across nine poem slides, placing extra lines on the final slides.
+The 5'lik, 6'lık, and 7'lik modes fill each slide to that size and leave the
+remainder on the final poem slide; each fixed mode is unavailable above nine
+full slides. Bent editing permits up to seven lines per slide, while Dörtlük and
+Beyit editing permits up to four. Only the first line can move backward and only
+the last line can move forward. Switching layouts rebuilds the grouping from
+the original poem and resets manual moves.
 
 The final photograph slide preserves the whole image and has no overlay, crop,
 or filter. To satisfy Instagram's JPEG publishing and consistent carousel
