@@ -301,8 +301,3 @@ Dockerfile               # Cloud Run container
 - The application has no database or user accounts. Do not expose an unprotected
   deployment containing a usable Instagram credential.
 
-## License
-
-No open-source license has been selected yet. Add a `LICENSE` file before making
-the repository public if you want to grant other people permission to reuse,
-modify, or redistribute the project.
