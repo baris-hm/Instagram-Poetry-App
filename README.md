@@ -1,9 +1,15 @@
 # Şiirden Karelere
 
-Şiirden Karelere is a small, single-user web application that turns a poem or
-other line-based text into an Instagram-ready image carousel. It provides an
-editable preview, renders the final 1080 × 1350 JPEGs on the server, and can
-publish a single image or carousel through Instagram's API.
+Şiirden Karelere is a small, single-user web application that I built for my 
+grandpa who is a turkish-bulgarian poet and was afraid to use Instagram. 
+
+He had been posting in text format on Facebook for a long time, so the idea was
+to automate the formatting and publishing side of things so that he could publish
+here too by using the exact same workflow.
+
+The app turns a poem or other line-based text into an Instagram-ready image carousel. 
+It provides an editable preview, renders the final 1080 × 1350 JPEGs on the server, 
+and can publish a single image or carousel through Instagram's API.
 
 The interface is in Turkish. The source and deployment documentation are in
 English so the project can be reused and hosted independently.
@@ -17,7 +23,7 @@ English so the project can be reused and hosted independently.
 
 - Exact, server-rendered previews using the same renderer as the published JPEGs
 - Word-boundary wrapping for long Turkish, Bulgarian, and other Unicode lines
-- Dörtlük (quatrain), Beyit (couplet), and Bent layout choices
+- Dörtlük (quatrain), Beyit (couplet), and Bent (other stanzas up to 7) layout choices
 - Automatic and fixed 5-, 6-, or 7-line Bent grouping
 - Up to 63 logical lines across at most nine text slides
 - Optional uncropped photograph as the final, tenth slide
