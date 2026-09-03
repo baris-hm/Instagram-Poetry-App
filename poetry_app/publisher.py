@@ -11,6 +11,7 @@ from .settings import AppSettings
 
 MAX_LINES_PER_POEM_SLIDE = 7
 MAX_POEM_LINES = 63
+MAX_CHARACTERS_PER_LINE = 5000
 
 
 class PublishValidationError(ValueError):
@@ -41,8 +42,10 @@ class PublishRequest:
             for raw_line in raw_slide:
                 if not isinstance(raw_line, str) or not raw_line.strip():
                     raise PublishValidationError("Şiir satırları boş olamaz.")
-                if len(raw_line) > 500:
-                    raise PublishValidationError("Bir şiir satırı çok uzun.")
+                if len(raw_line) > MAX_CHARACTERS_PER_LINE:
+                    raise PublishValidationError(
+                        "Bir satır en fazla 5000 karakter içerebilir."
+                    )
                 lines.append(raw_line.strip())
             slides.append(lines)
 

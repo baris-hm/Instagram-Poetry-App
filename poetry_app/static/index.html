@@ -7,8 +7,16 @@
       name="description"
       content="Şiirleri okunaklı Instagram gönderilerine dönüştüren sade bir araç."
     >
+    <meta name="theme-color" content="#a13d2d">
+    <meta name="application-name" content="Şiirden Karelere">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>Şiirden Karelere</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" type="image/png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/pwa.js" defer></script>
     <script src="/static/app.js" defer></script>
   </head>
   <body>
@@ -23,7 +31,11 @@
         </span>
       </a>
       <div class="header-actions">
-        <span class="prototype-badge">Prototip</span>
+        <button class="install-button" type="button" data-install-app hidden>
+          <span aria-hidden="true">↓</span>
+          Bilgisayara yükle
+        </button>
+        <span class="desktop-badge" data-installed-badge hidden>Masaüstü uygulaması</span>
         <form method="post" action="/logout">
           <button class="logout-button" type="submit">Çıkış</button>
         </form>
@@ -119,7 +131,7 @@
           <div>
             <p class="eyebrow">Gönderi önizlemesi</p>
             <h1 id="preview-title">Karelerini düzenle.</h1>
-            <p>Kaydırarak gez; bir satırın hangi karede görüneceğini aşağıdan değiştir.</p>
+            <p>Kaydırarak gez; gördüğün kare Instagram'a gönderilecek görselin aynısıdır.</p>
             <fieldset class="layout-field preview-layout-field">
               <legend>Kare düzeni</legend>
               <div class="layout-options" role="group" aria-label="Şiir satırı düzeni">

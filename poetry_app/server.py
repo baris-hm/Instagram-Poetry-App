@@ -29,7 +29,7 @@ from .poem_divider import (
     poem_lines,
 )
 from .publisher import InstagramPublishingService, PublishRequest, PublishValidationError
-from .renderer import RenderError
+from .renderer import CANVAS_SIZE, CarouselRenderer, RenderError
 from .settings import AppSettings
 
 LOGGER = logging.getLogger(__name__)
@@ -45,6 +45,25 @@ _STATIC_ROUTES: dict[str, tuple[Path, str]] = {
     "/preview": (STATIC_DIR / "index.html", "text/html; charset=utf-8"),
     "/static/styles.css": (STATIC_DIR / "styles.css", "text/css; charset=utf-8"),
     "/static/app.js": (STATIC_DIR / "app.js", "text/javascript; charset=utf-8"),
+    "/static/pwa.js": (STATIC_DIR / "pwa.js", "text/javascript; charset=utf-8"),
+    "/static/icons/icon-64.png": (STATIC_DIR / "icons" / "icon-64.png", "image/png"),
+    "/static/icons/icon-192.png": (STATIC_DIR / "icons" / "icon-192.png", "image/png"),
+    "/static/icons/icon-512.png": (STATIC_DIR / "icons" / "icon-512.png", "image/png"),
+    "/static/icons/icon-maskable-512.png": (
+        STATIC_DIR / "icons" / "icon-maskable-512.png",
+        "image/png",
+    ),
+}
+_PUBLIC_APP_ROUTES: dict[str, tuple[Path, str]] = {
+    "/manifest.webmanifest": (
+        STATIC_DIR / "manifest.webmanifest",
+        "application/manifest+json; charset=utf-8",
+    ),
+    "/service-worker.js": (
+        STATIC_DIR / "service-worker.js",
+        "text/javascript; charset=utf-8",
+    ),
+    "/offline": (STATIC_DIR / "offline.html", "text/html; charset=utf-8"),
 }
 LOGIN_PAGE = STATIC_DIR / "login.html"
 
@@ -52,7 +71,7 @@ LOGIN_PAGE = STATIC_DIR / "login.html"
 class PoetryRequestHandler(BaseHTTPRequestHandler):
     """Serve the app shell and JSON application endpoints."""
 
-    server_version = "PoetryCarousel/0.4"
+    server_version = "PoetryCarousel/0.5"
 
     @property
     def settings(self) -> AppSettings:
@@ -69,6 +88,9 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
         if path == "/login":
             self._handle_login_page()
             return
+        if path in _PUBLIC_APP_ROUTES:
+            self._handle_public_app_asset(path)
+            return
         if path.startswith("/static/"):
             self._handle_static(path)
             return
@@ -79,6 +101,10 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
             return
 
         self._handle_static(path)
+
+    def _handle_public_app_asset(self, path: str) -> None:
+        file_path, content_type = _PUBLIC_APP_ROUTES[path]
+        self._send_bytes(HTTPStatus.OK, file_path.read_bytes(), content_type)
 
     def _handle_static(self, path: str) -> None:
         route = _STATIC_ROUTES.get(path)
@@ -108,6 +134,9 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/preview":
             self._handle_preview()
+            return
+        if path == "/api/render-preview":
+            self._handle_render_preview()
             return
         if path == "/api/publish":
             self._handle_publish()
@@ -329,6 +358,35 @@ class PoetryRequestHandler(BaseHTTPRequestHandler):
                 {"error": "İstek okunamadı. Lütfen tekrar deneyin."},
             )
         except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+
+    def _handle_render_preview(self) -> None:
+        try:
+            request = PublishRequest.from_payload(self._read_json())
+            renderer = CarouselRenderer(
+                self.settings.media_dir,
+                "",
+                self.settings.instagram_handle,
+            )
+            rendered = renderer.render(
+                request.slides,
+                title=request.title,
+                photo_data_url=request.photo_data_url,
+            )
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "preview_urls": [item.public_url for item in rendered],
+                    "width": CANVAS_SIZE[0],
+                    "height": CANVAS_SIZE[1],
+                },
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "Önizleme isteği okunamadı."},
+            )
+        except (PublishValidationError, RenderError, ValueError) as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
     def _handle_publish(self) -> None:

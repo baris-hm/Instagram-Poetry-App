@@ -4,8 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Şiirden Karelere güvenli giriş sayfası.">
+    <meta name="theme-color" content="#a13d2d">
+    <meta name="application-name" content="Şiirden Karelere">
     <title>Giriş · Şiirden Karelere</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" type="image/png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/pwa.js" defer></script>
   </head>
   <body class="login-body">
     <main class="login-main">
@@ -23,6 +29,9 @@
           <button class="primary-button" type="submit">Giriş yap</button>
         </form>
         <small>Bu cihaz girişinizi hatırlayacaktır.</small>
+        <button class="login-install-button" type="button" data-install-app hidden>
+          Bu bilgisayara yükle
+        </button>
       </section>
     </main>
   </body>

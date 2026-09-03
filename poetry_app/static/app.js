@@ -16,6 +16,9 @@ const state = {
   bentMode: "automatic",
   maxLinesPerSlide: 4,
   photoUrl: "",
+  previewImageUrls: [],
+  previewRenderInProgress: false,
+  previewRenderReady: false,
   publishInProgress: false,
   publishingEnabled: false,
   slides: [],
@@ -269,6 +272,8 @@ function restoreDraft() {
       : "automatic";
     state.maxLinesPerSlide = state.layout === "bent" ? 7 : 4;
     state.slides = saved.slides.map((slide) => makeSlide(slide.lines ?? []));
+    state.previewImageUrls = [];
+    state.previewRenderReady = false;
     elements.title.value = state.title;
     elements.description.value = state.description;
     elements.poem.value = typeof saved.poem === "string" ? saved.poem : "";
@@ -299,6 +304,7 @@ async function createPreview(event) {
     const defaultLayout = countPoemLines(poem) >= 37 ? "bent" : "quatrain";
     const data = await requestPreview(defaultLayout, "automatic");
     applyPreviewData(data);
+    await refreshRenderedPreview();
     state.currentSlide = 0;
     saveDraft();
     showPreview({ updateHistory: true });
@@ -330,6 +336,46 @@ async function requestPreview(layout, bentMode = "automatic") {
   return data;
 }
 
+async function requestRenderedPreview() {
+  const photoDataUrl = await selectedPhotoAsDataUrl();
+  const response = await fetch("/api/render-preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      description: state.description,
+      photo_data_url: photoDataUrl,
+      slides: state.slides.map((slide) => slide.lines),
+      title: state.title,
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Kare önizlemeleri oluşturulamadı.");
+  }
+  if (!Array.isArray(data.preview_urls) || data.preview_urls.length !== visibleSlideCount()) {
+    throw new Error("Kare önizlemeleri eksik oluşturuldu.");
+  }
+  return data.preview_urls;
+}
+
+async function refreshRenderedPreview() {
+  state.previewRenderInProgress = true;
+  state.previewRenderReady = false;
+  state.previewImageUrls = [];
+  updatePublishAvailability();
+  if (!elements.previewView.hidden) {
+    renderPreview();
+  }
+
+  try {
+    state.previewImageUrls = await requestRenderedPreview();
+    state.previewRenderReady = true;
+  } finally {
+    state.previewRenderInProgress = false;
+    updatePublishAvailability();
+  }
+}
+
 function applyPreviewData(data) {
   state.title = data.title;
   state.description = data.description;
@@ -337,12 +383,17 @@ function applyPreviewData(data) {
   state.bentMode = data.bent_mode || state.bentMode || "automatic";
   state.maxLinesPerSlide = data.max_lines_per_slide;
   state.slides = data.slides.map(makeSlide);
+  state.previewImageUrls = [];
+  state.previewRenderReady = false;
   state.hasPublished = false;
   selectLayout(state.layout, state.bentMode);
   updatePublishAvailability();
 }
 
 async function applyLayout(layout, bentMode = state.bentMode) {
+  if (state.previewRenderInProgress) {
+    return;
+  }
   const normalizedBentMode = String(bentMode || "automatic");
   if (layout === state.layout && (layout !== "bent" || normalizedBentMode === state.bentMode)) {
     return;
@@ -357,6 +408,17 @@ async function applyLayout(layout, bentMode = state.bentMode) {
     return;
   }
 
+  const previousState = {
+    bentMode: state.bentMode,
+    currentSlide: state.currentSlide,
+    hasPublished: state.hasPublished,
+    layout: state.layout,
+    maxLinesPerSlide: state.maxLinesPerSlide,
+    previewImageUrls: [...state.previewImageUrls],
+    previewRenderReady: state.previewRenderReady,
+    slides: state.slides,
+  };
+
   elements.quatrainLayout.disabled = true;
   elements.coupletLayout.disabled = true;
   elements.bentLayout.disabled = true;
@@ -368,10 +430,21 @@ async function applyLayout(layout, bentMode = state.bentMode) {
   try {
     const data = await requestPreview(layout, normalizedBentMode);
     applyPreviewData(data);
+    await refreshRenderedPreview();
     state.currentSlide = 0;
     saveDraft();
     renderPreview();
   } catch (error) {
+    state.bentMode = previousState.bentMode;
+    state.currentSlide = previousState.currentSlide;
+    state.hasPublished = previousState.hasPublished;
+    state.layout = previousState.layout;
+    state.maxLinesPerSlide = previousState.maxLinesPerSlide;
+    state.previewImageUrls = previousState.previewImageUrls;
+    state.previewRenderReady = previousState.previewRenderReady;
+    state.slides = previousState.slides;
+    selectLayout(state.layout, state.bentMode);
+    renderPreview();
     failureMessage = error.message || "Görünüm değiştirilemedi.";
   } finally {
     updateLayoutControls();
@@ -427,39 +500,14 @@ function renderCarousel() {
   state.slides.forEach((slide, poemIndex) => {
     const visibleIndex = poemIndex;
     const card = document.createElement("article");
-    card.className = `slide-card${state.photoUrl ? " has-photo" : ""}`;
+    card.className = "slide-card rendered-slide";
     card.dataset.slideId = slide.id;
     card.setAttribute("aria-label", `Kare ${visibleIndex + 1}, toplam ${total}`);
-    if (state.photoUrl) {
-      card.style.backgroundImage = `url("${state.photoUrl}")`;
-    }
-
-    const content = document.createElement("div");
-    content.className = "slide-content";
-    if (poemIndex === 0 && state.title) {
-      const title = document.createElement("h2");
-      title.className = "slide-title";
-      title.textContent = state.title;
-      content.append(title);
-    }
-
-    const poem = document.createElement("div");
-    poem.className = "slide-poem";
-    slide.lines.forEach((line) => {
-      const text = document.createElement("div");
-      text.textContent = line;
-      poem.append(text);
-    });
-    content.append(poem);
-
-    const handle = document.createElement("span");
-    handle.className = "slide-handle";
-    handle.textContent = state.instagramHandle;
-
-    const number = document.createElement("span");
-    number.className = "slide-number";
-    number.textContent = `${String(visibleIndex + 1).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
-    card.append(content, handle, number);
+    appendRenderedSlide(
+      card,
+      visibleIndex,
+      `Instagram'da yayınlanacak ${visibleIndex + 1}. şiir karesi`,
+    );
     elements.carouselTrack.append(card);
     appendCarouselDot(visibleIndex, total);
   });
@@ -467,17 +515,17 @@ function renderCarousel() {
   if (state.photoUrl) {
     const visibleIndex = state.slides.length;
     const photoCard = document.createElement("article");
-    photoCard.className = "slide-card photo-slide";
+    photoCard.className = "slide-card photo-slide rendered-slide";
     photoCard.setAttribute(
       "aria-label",
       `Düzenlenmemiş fotoğraf, son kare ${visibleIndex + 1}, toplam ${total}`,
     );
 
-    const photo = document.createElement("img");
-    photo.className = "photo-slide-image";
-    photo.src = state.photoUrl;
-    photo.alt = "Seçilen fotoğrafın düzenlenmemiş önizlemesi";
-    photoCard.append(photo);
+    appendRenderedSlide(
+      photoCard,
+      visibleIndex,
+      "Instagram'da yayınlanacak düzenlenmemiş fotoğraf karesi",
+    );
     elements.carouselTrack.append(photoCard);
     appendCarouselDot(visibleIndex, total);
   }
@@ -485,6 +533,25 @@ function renderCarousel() {
   requestAnimationFrame(() => {
     elements.carouselTrack.scrollLeft = state.currentSlide * elements.carouselTrack.clientWidth;
   });
+}
+
+function appendRenderedSlide(card, index, alt) {
+  const imageUrl = state.previewImageUrls[index];
+  if (imageUrl) {
+    const image = document.createElement("img");
+    image.className = "rendered-slide-image";
+    image.src = imageUrl;
+    image.alt = alt;
+    card.append(image);
+    return;
+  }
+
+  const placeholder = document.createElement("div");
+  placeholder.className = "rendered-slide-placeholder";
+  placeholder.textContent = state.previewRenderInProgress
+    ? "Kare hazırlanıyor…"
+    : "Kare önizlemesi hazırlanamadı.";
+  card.append(placeholder);
 }
 
 function appendCarouselDot(index, total) {
@@ -541,11 +608,17 @@ function renderLineEditor() {
           -1,
         );
         const previousSlide = state.slides[poemSlideIndex - 1];
-        previous.disabled = !previousSlide || previousSlide.lines.length >= state.maxLinesPerSlide;
+        previous.disabled = state.previewRenderInProgress
+          || !previousSlide
+          || previousSlide.lines.length >= state.maxLinesPerSlide;
         if (previous.disabled) {
-          previous.title = previousSlide
-            ? `Önceki kare en fazla ${state.maxLinesPerSlide} satır alabilir.`
-            : "Önceki şiir karesi yok.";
+          if (state.previewRenderInProgress) {
+            previous.title = "Kare önizlemesi hazırlanıyor.";
+          } else {
+            previous.title = previousSlide
+              ? `Önceki kare en fazla ${state.maxLinesPerSlide} satır alabilir.`
+              : "Önceki şiir karesi yok.";
+          }
         }
         actions.append(previous);
       }
@@ -561,11 +634,14 @@ function renderLineEditor() {
         const movingWouldHaveNoEffect = !nextSlide && slide.lines.length === 1;
         const movingWouldExceedSlideLimit = !nextSlide
           && visibleSlideCount() >= MAX_CAROUSEL_SLIDES;
-        next.disabled = movingWouldHaveNoEffect
+        next.disabled = state.previewRenderInProgress
+          || movingWouldHaveNoEffect
           || movingWouldExceedSlideLimit
           || Boolean(nextSlide && nextSlide.lines.length >= state.maxLinesPerSlide);
         if (next.disabled) {
-          if (movingWouldHaveNoEffect) {
+          if (state.previewRenderInProgress) {
+            next.title = "Kare önizlemesi hazırlanıyor.";
+          } else if (movingWouldHaveNoEffect) {
             next.title = "Taşınacak başka bir şiir karesi yok.";
           } else if (movingWouldExceedSlideLimit) {
             next.title = "Fotoğraf dahil en fazla 10 kare hazırlanabilir.";
@@ -591,7 +667,10 @@ function makeMoveButton(label, poemSlideIndex, lineIndex, direction) {
   return button;
 }
 
-function moveLine(sourceIndex, lineIndex, direction) {
+async function moveLine(sourceIndex, lineIndex, direction) {
+  if (state.previewRenderInProgress) {
+    return;
+  }
   const source = state.slides[sourceIndex];
   const isAllowedBoundary = direction < 0
     ? lineIndex === 0
@@ -606,6 +685,15 @@ function moveLine(sourceIndex, lineIndex, direction) {
   ) {
     return;
   }
+
+  const previousSlides = state.slides.map((slide) => ({
+    id: slide.id,
+    lines: [...slide.lines],
+  }));
+  const previousImageUrls = [...state.previewImageUrls];
+  const previousRenderReady = state.previewRenderReady;
+  const previousCurrentSlide = state.currentSlide;
+  const previousHasPublished = state.hasPublished;
 
   const [line] = source.lines.splice(lineIndex, 1);
   let targetIndex = sourceIndex + direction;
@@ -630,9 +718,26 @@ function moveLine(sourceIndex, lineIndex, direction) {
 
   state.currentSlide = targetIndex;
   state.hasPublished = false;
-  saveDraft();
   renderPreview();
-  updatePublishAvailability();
+  elements.layoutStatus.classList.remove("is-warning");
+  elements.layoutStatus.textContent = "Kare önizlemesi hazırlanıyor…";
+
+  try {
+    await refreshRenderedPreview();
+    saveDraft();
+    renderPreview();
+    updateLayoutControls();
+  } catch (error) {
+    state.slides = previousSlides;
+    state.previewImageUrls = previousImageUrls;
+    state.previewRenderReady = previousRenderReady;
+    state.currentSlide = previousCurrentSlide;
+    state.hasPublished = previousHasPublished;
+    renderPreview();
+    elements.layoutStatus.classList.add("is-warning");
+    elements.layoutStatus.textContent = error.message || "Kare önizlemesi güncellenemedi.";
+    updatePublishAvailability();
+  }
 }
 
 function renderCaption() {
@@ -714,6 +819,8 @@ async function loadPublishingConfig() {
 function updatePublishAvailability() {
   elements.publishButton.disabled = !state.publishingEnabled
     || state.slides.length === 0
+    || !state.previewRenderReady
+    || state.previewRenderInProgress
     || state.publishInProgress
     || state.hasPublished;
 }
@@ -748,7 +855,13 @@ function showPublishResult(message, { error = false, permalink = "" } = {}) {
 }
 
 async function publishPost() {
-  if (!state.publishingEnabled || state.publishInProgress || state.hasPublished) {
+  if (
+    !state.publishingEnabled
+    || !state.previewRenderReady
+    || state.previewRenderInProgress
+    || state.publishInProgress
+    || state.hasPublished
+  ) {
     return;
   }
   const total = visibleSlideCount();
@@ -827,4 +940,14 @@ updateLayoutControls();
 loadPublishingConfig();
 if (window.location.pathname === "/preview" && restoreDraft()) {
   showPreview();
+  refreshRenderedPreview()
+    .then(() => {
+      renderPreview();
+      updateLayoutControls();
+    })
+    .catch((error) => {
+      renderPreview();
+      elements.layoutStatus.classList.add("is-warning");
+      elements.layoutStatus.textContent = error.message || "Kare önizlemeleri oluşturulamadı.";
+    });
 }

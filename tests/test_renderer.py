@@ -9,6 +9,14 @@ from PIL import Image
 from poetry_app.renderer import CANVAS_SIZE, CarouselRenderer, RenderError, decode_photo_data_url
 
 
+LONG_PROSE_LINES = [
+    "Bendeniz tarafından derlenip çevrilmiş ve Ankara’daki Bengü Yayınevi’nde 11 yıl önce, bugünkü tarihte, yayımlanmış olan Bulgar Şiiri Antolojisi Türk okurları tarafından öyle büyük bir ilgi ve sevgiyle karşılanmıştı ki,",
+    "bugüne değin hâlâ duygularını paylaşmak için beni arayanlar bulunuyor.",
+    "Издадената преди 11 години на днешна дата от издателство „Бенгю“ в Анкара беше издадена",
+    "„Антология на българскака поезия“, съставена и преведена от моя милост, която се посрещна много радушно от турските читатели, които до ден днешен ми се обаждат и споделят своите прекрасни впечатления.",
+]
+
+
 def photo_data_url(size: tuple[int, int] = (640, 480)) -> str:
     image = Image.new("RGB", size, (198, 86, 57))
     output = io.BytesIO()
@@ -51,6 +59,17 @@ class RendererTests(unittest.TestCase):
     def test_rejects_unsupported_photo_data(self) -> None:
         with self.assertRaises(RenderError):
             decode_photo_data_url("data:image/gif;base64,R0lGODlh")
+
+    def test_wraps_long_turkish_and_bulgarian_prose_instead_of_rejecting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            renderer = CarouselRenderer(Path(directory), "", "@hesap")
+
+            rendered = renderer.render([LONG_PROSE_LINES])
+
+            self.assertEqual(len(rendered), 1)
+            with Image.open(rendered[0].path) as image:
+                self.assertEqual(image.size, CANVAS_SIZE)
+                self.assertEqual(image.format, "JPEG")
 
 
 if __name__ == "__main__":

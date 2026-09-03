@@ -2,11 +2,14 @@ import json
 import tempfile
 import threading
 import unittest
+from io import BytesIO
 from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+from PIL import Image
 
 from poetry_app.server import create_server
 from poetry_app.settings import AppSettings
@@ -56,6 +59,53 @@ class ServerTests(unittest.TestCase):
         self.assertIn("Otomatik", body)
         self.assertIn("7'lik", body)
         self.assertIn("Instagram'da yayınla", body)
+        self.assertIn('rel="manifest" href="/manifest.webmanifest"', body)
+        self.assertIn("data-install-app", body)
+
+    def test_installable_app_assets_are_served(self) -> None:
+        with urlopen(f"{self.base_url}/manifest.webmanifest") as response:
+            manifest = json.load(response)
+            content_type = response.headers["Content-Type"]
+
+        self.assertEqual(content_type, "application/manifest+json; charset=utf-8")
+        self.assertEqual(manifest["name"], "Şiirden Karelere")
+        self.assertEqual(manifest["start_url"], "/")
+        self.assertEqual(manifest["scope"], "/")
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertEqual(
+            {icon["sizes"] for icon in manifest["icons"]},
+            {"192x192", "512x512"},
+        )
+        self.assertIn(
+            "maskable",
+            {icon["purpose"] for icon in manifest["icons"]},
+        )
+
+        for filename, expected_size in (
+            ("icon-64.png", (64, 64)),
+            ("icon-192.png", (192, 192)),
+            ("icon-512.png", (512, 512)),
+            ("icon-maskable-512.png", (512, 512)),
+        ):
+            with urlopen(f"{self.base_url}/static/icons/{filename}") as response:
+                self.assertEqual(response.headers["Content-Type"], "image/png")
+                with Image.open(BytesIO(response.read())) as icon:
+                    self.assertEqual(icon.size, expected_size)
+                    self.assertEqual(icon.mode, "RGB")
+
+    def test_service_worker_never_caches_private_app_data(self) -> None:
+        with urlopen(f"{self.base_url}/service-worker.js") as response:
+            worker = response.read().decode("utf-8")
+
+        self.assertEqual(response.status, 200)
+        self.assertIn('const CACHE_NAME = "siirden-karelere-static-v2"', worker)
+        self.assertIn('caches.match("/offline")', worker)
+        self.assertNotIn('"/api/', worker)
+        self.assertNotIn('"/media/', worker)
+
+        with urlopen(f"{self.base_url}/offline") as response:
+            offline_page = response.read().decode("utf-8")
+        self.assertIn("İnternet bağlantısı gerekli", offline_page)
 
     def test_preview_route_supports_refresh(self) -> None:
         with urlopen(f"{self.base_url}/preview") as response:
@@ -116,6 +166,26 @@ class ServerTests(unittest.TestCase):
 
         self.assertEqual(status, 400)
         self.assertIn("şiirinizi", body["error"])
+
+    def test_render_preview_returns_the_exact_jpeg_used_by_the_renderer(self) -> None:
+        long_lines = [
+            "Bendeniz tarafından derlenip çevrilmiş ve Ankara’daki Bengü Yayınevi’nde 11 yıl önce, bugünkü tarihte, yayımlanmış olan Bulgar Şiiri Antolojisi Türk okurları tarafından öyle büyük bir ilgi ve sevgiyle karşılanmıştı ki,",
+            "Издадената преди 11 години на днешна дата от издателство „Бенгю“ в Анкара беше издадена „Антология на българскака поезия“, съставена и преведена от моя милост.",
+        ]
+
+        status, body = self.post_json(
+            "/api/render-preview",
+            {"slides": [long_lines], "title": "Anı", "description": ""},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual((body["width"], body["height"]), (1080, 1350))
+        self.assertEqual(len(body["preview_urls"]), 1)
+        self.assertRegex(body["preview_urls"][0], r"^/media/[a-f0-9]{32}\.jpg$")
+        with urlopen(f"{self.base_url}{body['preview_urls'][0]}") as response:
+            with Image.open(BytesIO(response.read())) as preview:
+                self.assertEqual(preview.size, (1080, 1350))
+                self.assertEqual(preview.format, "JPEG")
 
     def test_preview_defaults_to_automatic_bent_layout_at_37_verses(self) -> None:
         poem = "\n".join(f"Dize {number}" for number in range(1, 38))
@@ -260,6 +330,16 @@ class ServerTests(unittest.TestCase):
                 response.read()
                 self.assertEqual(response.status, 302)
                 self.assertEqual(response.getheader("Location"), "/login")
+
+                for public_app_path in (
+                    "/manifest.webmanifest",
+                    "/service-worker.js",
+                    "/static/icons/icon-192.png",
+                ):
+                    connection.request("GET", public_app_path)
+                    response = connection.getresponse()
+                    response.read()
+                    self.assertEqual(response.status, 200)
 
                 connection.request("GET", "/health")
                 response = connection.getresponse()

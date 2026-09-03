@@ -15,6 +15,10 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 CANVAS_SIZE = (1080, 1350)
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 ALLOWED_PHOTO_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+POEM_MAX_WIDTH = 850
+POEM_MAX_HEIGHT = 660
+POEM_MAX_FONT_SIZE = 64
+POEM_MIN_FONT_SIZE = 28
 
 
 class RenderError(ValueError):
@@ -90,14 +94,18 @@ class CarouselRenderer:
     ) -> Image.Image:
         image = _background(photo)
         draw = ImageDraw.Draw(image)
-        poem_font = _fit_poem_font(draw, lines, max_width=850, max_height=660)
+        poem_font, wrapped_verses = _fit_poem_layout(
+            draw,
+            lines,
+            max_width=POEM_MAX_WIDTH,
+            max_height=POEM_MAX_HEIGHT,
+        )
         title_font = _font("sans-bold", 34)
         meta_font = _font("sans-bold", 26)
 
-        line_metrics = [draw.textbbox((0, 0), line, font=poem_font) for line in lines]
-        line_heights = [box[3] - box[1] for box in line_metrics]
-        gap = max(20, poem_font.size // 2)
-        poem_height = sum(line_heights) + gap * max(0, len(lines) - 1)
+        poem_height = _wrapped_poem_height(draw, wrapped_verses, poem_font)
+        wrapped_line_gap = max(8, poem_font.size // 5)
+        verse_gap = max(20, poem_font.size // 2)
         title_space = 80 if title else 0
         y = (CANVAS_SIZE[1] - poem_height - title_space) // 2 + title_space
 
@@ -111,17 +119,24 @@ class CarouselRenderer:
                 font=title_font,
             )
 
-        for line, box, height in zip(lines, line_metrics, line_heights):
-            width = box[2] - box[0]
-            draw.text(
-                ((CANVAS_SIZE[0] - width) / 2, y),
-                line,
-                fill=(255, 253, 247),
-                font=poem_font,
-                stroke_width=1,
-                stroke_fill=(15, 18, 16),
-            )
-            y += height + gap
+        for verse_index, wrapped_lines in enumerate(wrapped_verses):
+            for wrapped_index, line in enumerate(wrapped_lines):
+                box = draw.textbbox((0, 0), line, font=poem_font)
+                width = box[2] - box[0]
+                height = box[3] - box[1]
+                draw.text(
+                    ((CANVAS_SIZE[0] - width) / 2, y),
+                    line,
+                    fill=(255, 253, 247),
+                    font=poem_font,
+                    stroke_width=1,
+                    stroke_fill=(15, 18, 16),
+                )
+                y += height
+                if wrapped_index < len(wrapped_lines) - 1:
+                    y += wrapped_line_gap
+            if verse_index < len(wrapped_verses) - 1:
+                y += verse_gap
 
         draw.text((76, 1260), self.handle, fill=(235, 235, 228), font=meta_font)
         counter = f"{index:02d} / {total:02d}"
@@ -202,26 +217,114 @@ def _background(photo: Image.Image | None) -> Image.Image:
     return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 
-def _fit_poem_font(
+def _fit_poem_layout(
     draw: ImageDraw.ImageDraw,
     lines: list[str],
     *,
     max_width: int,
     max_height: int,
-) -> ImageFont.FreeTypeFont:
-    for size in range(64, 27, -2):
+) -> tuple[ImageFont.FreeTypeFont, list[list[str]]]:
+    """Choose a font and word-wrap every logical verse for the final image.
+
+    When even the minimum font is taller than the preferred poem area, the
+    minimum-size layout is returned instead of failing. The resulting clipping
+    is visible in the server-rendered preview, allowing the user to move verses
+    to another slide before publishing.
+    """
+
+    fallback: tuple[ImageFont.FreeTypeFont, list[list[str]]] | None = None
+    for size in range(POEM_MAX_FONT_SIZE, POEM_MIN_FONT_SIZE - 1, -2):
         font = _font("serif", size)
-        boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
-        width = max((box[2] - box[0] for box in boxes), default=0)
-        heights = [box[3] - box[1] for box in boxes]
-        height = sum(heights) + max(20, size // 2) * max(0, len(lines) - 1)
-        if width <= max_width and height <= max_height:
-            return font
-    fallback = _font("serif", 28)
-    fallback_boxes = [draw.textbbox((0, 0), line, font=fallback) for line in lines]
-    if max((box[2] - box[0] for box in fallback_boxes), default=0) > max_width:
-        raise RenderError("Bir şiir satırı görsele sığmayacak kadar uzun.")
+        wrapped_verses = [_wrap_text(draw, line, font, max_width) for line in lines]
+        fallback = (font, wrapped_verses)
+        if _wrapped_poem_height(draw, wrapped_verses, font) <= max_height:
+            return fallback
+
+    if fallback is None:  # The configured font range is always non-empty.
+        raise RenderError("Şiir yazı tipi hazırlanamadı.")
     return fallback
+
+
+def _wrap_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+) -> list[str]:
+    """Wrap one logical verse at words, splitting only overlong words."""
+
+    words = text.split()
+    if not words:
+        return [""]
+
+    wrapped: list[str] = []
+    current = ""
+    for word in words:
+        if _text_width(draw, word, font) > max_width:
+            if current:
+                wrapped.append(current)
+                current = ""
+            pieces = _split_overlong_word(draw, word, font, max_width)
+            wrapped.extend(pieces[:-1])
+            current = pieces[-1]
+            continue
+
+        candidate = f"{current} {word}" if current else word
+        if current and _text_width(draw, candidate, font) > max_width:
+            wrapped.append(current)
+            current = word
+        else:
+            current = candidate
+
+    if current:
+        wrapped.append(current)
+    return wrapped
+
+
+def _split_overlong_word(
+    draw: ImageDraw.ImageDraw,
+    word: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+) -> list[str]:
+    pieces: list[str] = []
+    current = ""
+    for character in word:
+        candidate = current + character
+        if current and _text_width(draw, candidate, font) > max_width:
+            pieces.append(current)
+            current = character
+        else:
+            current = candidate
+    if current:
+        pieces.append(current)
+    return pieces or [word]
+
+
+def _text_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+) -> int:
+    box = draw.textbbox((0, 0), text, font=font)
+    return box[2] - box[0]
+
+
+def _wrapped_poem_height(
+    draw: ImageDraw.ImageDraw,
+    wrapped_verses: list[list[str]],
+    font: ImageFont.FreeTypeFont,
+) -> int:
+    wrapped_line_gap = max(8, font.size // 5)
+    verse_gap = max(20, font.size // 2)
+    height = 0
+    for verse_index, wrapped_lines in enumerate(wrapped_verses):
+        boxes = [draw.textbbox((0, 0), line, font=font) for line in wrapped_lines]
+        height += sum(box[3] - box[1] for box in boxes)
+        height += wrapped_line_gap * max(0, len(wrapped_lines) - 1)
+        if verse_index < len(wrapped_verses) - 1:
+            height += verse_gap
+    return height
 
 
 def _font(kind: str, size: int) -> ImageFont.FreeTypeFont:

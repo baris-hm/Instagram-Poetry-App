@@ -1,0 +1,49 @@
+{
+  "id": "/",
+  "name": "Şiirden Karelere",
+  "short_name": "Şiirden Karelere",
+  "description": "Şiirleri düzenleyip Instagram gönderilerine dönüştüren aile uygulaması.",
+  "lang": "tr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f0e7",
+  "theme_color": "#a13d2d",
+  "categories": ["productivity", "social"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Yeni gönderi",
+      "short_name": "Yeni gönderi",
+      "description": "Yeni bir şiir gönderisi hazırla.",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/static/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

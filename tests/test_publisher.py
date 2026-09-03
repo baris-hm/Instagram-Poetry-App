@@ -88,6 +88,13 @@ class PublisherTests(unittest.TestCase):
 
         self.assertEqual(request.slides, [lines])
 
+    def test_publish_request_accepts_a_long_wrappable_prose_line(self) -> None:
+        long_line = "uzun metin " * 100
+
+        request = PublishRequest.from_payload({"slides": [[long_line]]})
+
+        self.assertEqual(request.slides[0][0], long_line.strip())
+
     def test_publish_request_rejects_more_than_seven_lines_per_slide(self) -> None:
         lines = [f"Dize {number}" for number in range(1, 9)]
 

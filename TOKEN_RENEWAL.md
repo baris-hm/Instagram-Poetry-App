@@ -1,134 +1,114 @@
 # Automatic Instagram token renewal
 
-The hosted app uses two Cloud Run workloads built from the same container image:
+The optional renewal setup uses two Cloud Run workloads built from the same
+container image:
 
-- The web service reads the current Instagram token from a Secret Manager volume.
-- A private Cloud Run job refreshes the token with Meta, validates it with `/me`,
-  and adds the replacement as the latest Secret Manager version.
-- The job retains the newest token and one rollback version, then destroys only
-  older token versions so rotation remains within Secret Manager's free allowance.
-- Cloud Scheduler runs the private job every Monday at 04:00 Europe/Istanbul.
+- the web service reads the current Instagram token from a Secret Manager volume;
+- a private Cloud Run Job refreshes and validates the token, then adds the new
+  value as a secret version; and
+- Cloud Scheduler runs that job weekly.
 
-The web service reads the mounted file for every publish request. Cloud Run fetches
-the latest secret version when the volume is read, so a token rotation does not
-require a new service revision.
+The refresh code keeps the newest token and one rollback version. It never logs
+the token value.
 
-## Deploy the renewal-capable image
-
-Deploy the source as the existing service, preserving the single-instance settings:
+Complete the normal Cloud Run deployment first, then define these values in
+Cloud Shell:
 
 ```bash
-gcloud run deploy siirden-karelere \
-  --source . \
-  --project=siirden-karelere \
-  --region=europe-west1 \
-  --allow-unauthenticated \
-  --cpu=1 \
-  --memory=512Mi \
-  --concurrency=20 \
-  --timeout=300 \
-  --max-instances=1 \
-  --min-instances=0
+PROJECT_ID="your-google-cloud-project"
+REGION="europe-west1"
+SERVICE="your-service-name"
+TOKEN_SECRET="instagram-access-token"
+REFRESH_JOB="instagram-token-refresh"
+SCHEDULER_JOB="instagram-token-refresh-weekly"
+AUTOMATION_SA_NAME="instagram-token-automation"
+
+AUTOMATION_SA="${AUTOMATION_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+SECRET_RESOURCE="projects/${PROJECT_ID}/secrets/${TOKEN_SECRET}"
+
+gcloud config set project "$PROJECT_ID"
 ```
 
-Replace the pinned token environment variable with a latest-version secret volume:
+## Mount the current token in the web service
+
+Replace an environment-variable secret mapping with a latest-version secret
+volume. The application reads this file for each publish request:
 
 ```bash
-gcloud run services update siirden-karelere \
-  --project=siirden-karelere \
-  --region=europe-west1 \
+gcloud run services update "$SERVICE" \
+  --region "$REGION" \
   --remove-secrets=INSTAGRAM_ACCESS_TOKEN \
-  --update-secrets=/secrets/instagram/access-token=instagram-access-token:latest \
+  --update-secrets="/secrets/instagram/access-token=${TOKEN_SECRET}:latest" \
   --update-env-vars=INSTAGRAM_ACCESS_TOKEN_FILE=/secrets/instagram/access-token
 ```
 
 ## Create the private refresh job
 
-Enable scheduling and create one narrowly scoped service account:
+Enable scheduling, create a dedicated service account, and grant it access only
+to the token secret:
 
 ```bash
-gcloud services enable cloudscheduler.googleapis.com secretmanager.googleapis.com \
-  --project=siirden-karelere
+gcloud services enable cloudscheduler.googleapis.com secretmanager.googleapis.com
 
-gcloud iam service-accounts create instagram-token-automation \
-  --project=siirden-karelere \
+gcloud iam service-accounts create "$AUTOMATION_SA_NAME" \
   --display-name="Instagram token renewal"
 
-TOKEN_AUTOMATION_SA="instagram-token-automation@siirden-karelere.iam.gserviceaccount.com"
-```
-
-Allow that identity to read and add versions of only the Instagram token secret:
-
-```bash
-gcloud secrets add-iam-policy-binding instagram-access-token \
-  --project=siirden-karelere \
-  --member="serviceAccount:${TOKEN_AUTOMATION_SA}" \
+gcloud secrets add-iam-policy-binding "$TOKEN_SECRET" \
+  --member="serviceAccount:${AUTOMATION_SA}" \
   --role=roles/secretmanager.secretAccessor
 
-gcloud secrets add-iam-policy-binding instagram-access-token \
-  --project=siirden-karelere \
-  --member="serviceAccount:${TOKEN_AUTOMATION_SA}" \
+gcloud secrets add-iam-policy-binding "$TOKEN_SECRET" \
+  --member="serviceAccount:${AUTOMATION_SA}" \
   --role=roles/secretmanager.secretVersionAdder
 
-gcloud secrets add-iam-policy-binding instagram-access-token \
-  --project=siirden-karelere \
-  --member="serviceAccount:${TOKEN_AUTOMATION_SA}" \
+gcloud secrets add-iam-policy-binding "$TOKEN_SECRET" \
+  --member="serviceAccount:${AUTOMATION_SA}" \
   --role=roles/secretmanager.secretVersionManager
 ```
 
-Use the image deployed to the web service for the private job:
+Reuse the image currently deployed to the web service:
 
 ```bash
-IMAGE_URL="$(gcloud run services describe siirden-karelere \
-  --project=siirden-karelere \
-  --region=europe-west1 \
+IMAGE_URL="$(gcloud run services describe "$SERVICE" \
+  --region "$REGION" \
   --format='value(spec.template.spec.containers[0].image)')"
 
-gcloud run jobs deploy instagram-token-refresh \
-  --project=siirden-karelere \
-  --region=europe-west1 \
-  --image="${IMAGE_URL}" \
-  --service-account="${TOKEN_AUTOMATION_SA}" \
+gcloud run jobs deploy "$REFRESH_JOB" \
+  --region "$REGION" \
+  --image="$IMAGE_URL" \
+  --service-account="$AUTOMATION_SA" \
   --command=python \
   --args=-m,poetry_app.token_refresh \
-  --set-env-vars=INSTAGRAM_ACCESS_TOKEN_FILE=/secrets/instagram/access-token,INSTAGRAM_SECRET_RESOURCE=projects/siirden-karelere/secrets/instagram-access-token,INSTAGRAM_GRAPH_API_VERSION=v26.0,INSTAGRAM_GRAPH_BASE_URL=https://graph.instagram.com \
-  --set-secrets=/secrets/instagram/access-token=instagram-access-token:latest \
+  --set-env-vars="INSTAGRAM_ACCESS_TOKEN_FILE=/secrets/instagram/access-token,INSTAGRAM_SECRET_RESOURCE=${SECRET_RESOURCE},INSTAGRAM_GRAPH_API_VERSION=v26.0,INSTAGRAM_GRAPH_BASE_URL=https://graph.instagram.com" \
+  --set-secrets="/secrets/instagram/access-token=${TOKEN_SECRET}:latest" \
   --tasks=1 \
   --max-retries=1 \
   --task-timeout=120s
 ```
 
-## Schedule the job
-
-Grant the automation identity permission to execute only this job, then create the
-weekly schedule:
+## Schedule and test the job
 
 ```bash
-gcloud run jobs add-iam-policy-binding instagram-token-refresh \
-  --project=siirden-karelere \
-  --region=europe-west1 \
-  --member="serviceAccount:${TOKEN_AUTOMATION_SA}" \
+gcloud run jobs add-iam-policy-binding "$REFRESH_JOB" \
+  --region "$REGION" \
+  --member="serviceAccount:${AUTOMATION_SA}" \
   --role=roles/run.invoker
 
-gcloud scheduler jobs create http instagram-token-refresh-weekly \
-  --project=siirden-karelere \
-  --location=europe-west1 \
+gcloud scheduler jobs create http "$SCHEDULER_JOB" \
+  --location="$REGION" \
   --schedule="0 4 * * 1" \
   --time-zone="Europe/Istanbul" \
-  --uri="https://run.googleapis.com/v2/projects/siirden-karelere/locations/europe-west1/jobs/instagram-token-refresh:run" \
+  --uri="https://run.googleapis.com/v2/projects/${PROJECT_ID}/locations/${REGION}/jobs/${REFRESH_JOB}:run" \
   --http-method=POST \
-  --oauth-service-account-email="${TOKEN_AUTOMATION_SA}"
+  --oauth-service-account-email="$AUTOMATION_SA"
 ```
 
-Long-lived Instagram tokens must be at least 24 hours old before Meta will refresh
-them. After that point, test the job manually:
+A long-lived Instagram token must be old enough for Meta to refresh it. After at
+least 24 hours, test the private job manually:
 
 ```bash
-gcloud run jobs execute instagram-token-refresh \
-  --project=siirden-karelere \
-  --region=europe-west1 \
-  --wait
+gcloud run jobs execute "$REFRESH_JOB" --region "$REGION" --wait
 ```
 
-Successful output and logs identify the Instagram username, the new Secret Manager
-version number, and the lifetime in seconds. They never print the token.
+Successful output identifies the Instagram username, new Secret Manager version,
+and lifetime in seconds. It does not print the credential.
